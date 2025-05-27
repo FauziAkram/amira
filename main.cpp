@@ -563,6 +563,11 @@ struct TTEntry {
 std::vector<TTEntry> transposition_table;
 uint64_t tt_mask = 0;
 
+// Global TT state for deferred initialization
+bool g_tt_is_initialized = false;
+int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
+
+
 void init_tt(size_t mb_size) {
     if (mb_size == 0) {
         transposition_table.clear(); tt_mask = 0; return;
@@ -579,21 +584,21 @@ void init_tt(size_t mb_size) {
          transposition_table.clear(); tt_mask = 0; return;
     }
     try {
-        transposition_table.assign(power_of_2_entries, TTEntry());
+        transposition_table.assign(power_of_2_entries, TTEntry()); // Clears old and assigns new
         tt_mask = power_of_2_entries - 1;
     } catch (const std::bad_alloc&) {
         transposition_table.clear(); tt_mask = 0;
     }
 }
 
-void clear_tt() {
+void clear_tt() { // This function is now mostly for explicit clearing if needed, init_tt handles its own.
     if (!transposition_table.empty()) {
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
     }
 }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
-    if (tt_mask == 0) return false;
+    if (tt_mask == 0 || !g_tt_is_initialized) return false; // Check if TT is initialized
     TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (entry.hash == hash && entry.bound != TT_NONE) {
@@ -613,7 +618,7 @@ bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& mo
 }
 
 void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move) {
-    if (tt_mask == 0) return;
+    if (tt_mask == 0 || !g_tt_is_initialized) return; // Check if TT is initialized
     TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (score > MATE_THRESHOLD) score += ply;
@@ -956,7 +961,7 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
 void uci_loop() {
     std::string line, token;
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    int current_tt_size_mb = TT_SIZE_MB_DEFAULT;
+    // g_configured_tt_size_mb is already TT_SIZE_MB_DEFAULT globally
 
     while (std::getline(std::cin, line)) {
         std::istringstream ss(line);
@@ -966,24 +971,36 @@ void uci_loop() {
             std::cout << "id name Amira\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
-            std::cout << "uciok\n";
+            std::cout << "uciok\n" << std::flush; // Ensure uciok is sent out immediately
         } else if (token == "isready") {
-            std::cout << "readyok\n";
+            if (!g_tt_is_initialized) {
+                init_tt(g_configured_tt_size_mb); // Uses current g_configured_tt_size_mb (default or from setoption)
+                g_tt_is_initialized = true;
+            }
+            std::cout << "readyok\n" << std::flush; // Ensure readyok is sent out immediately
         } else if (token == "setoption") {
             std::string name_token, value_token, name_str, value_str_val;
             ss >> name_token;
             if (name_token == "name") {
-                ss >> name_str >> value_token >> value_str_val;
+                ss >> name_str >> value_token >> value_str_val; // Expect "name <option_name> value <option_value>"
                 if (name_str == "Hash") {
                     try {
-                        current_tt_size_mb = std::stoi(value_str_val);
-                        init_tt(current_tt_size_mb);
-                    } catch (...) { init_tt(TT_SIZE_MB_DEFAULT); }
+                        int parsed_size = std::stoi(value_str_val);
+                        g_configured_tt_size_mb = parsed_size; // Update configured size
+                    } catch (...) {
+                        // If parsing fails, g_configured_tt_size_mb remains what it was.
+                        // We will initialize with this value in init_tt below.
+                    }
+                    // (Re)Initialize TT with the (newly) configured or last known valid size.
+                    init_tt(g_configured_tt_size_mb);
+                    g_tt_is_initialized = true;
                 }
             }
         } else if (token == "ucinewgame") {
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-            clear_tt();
+            // (Re)Initialize TT to the currently configured size (or default if never changed)
+            init_tt(g_configured_tt_size_mb);
+            g_tt_is_initialized = true;
             reset_killers_and_history();
             game_history_hashes.clear();
         } else if (token == "position") {
@@ -991,29 +1008,27 @@ void uci_loop() {
             ss >> token; // "fen" or "startpos"
             if (token == "startpos") {
                 parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-                // Check if "moves" follows
                 if (ss.rdbuf()->in_avail() > 0) {
                     std::string next_word; std::streampos p = ss.tellg(); ss >> next_word;
                     if (next_word == "moves") token = "moves"; else {ss.seekg(p); token = "";}
                 } else token = "";
             } else if (token == "fen") {
                 std::string temp_fen_part;
-                for (int i = 0; i < 6; ++i) { // FEN has 6 fields
+                for (int i = 0; i < 6; ++i) { 
                     if (!(ss >> temp_fen_part)) break;
                     if (temp_fen_part == "moves") { token = "moves"; break; }
                     fen_str_collector += temp_fen_part + " ";
                 }
-                if (token != "moves") { // "moves" not encountered during FEN parts
-                   if (!fen_str_collector.empty()) fen_str_collector.pop_back(); // remove last space
+                if (token != "moves") { 
+                   if (!fen_str_collector.empty()) fen_str_collector.pop_back(); 
                    parse_fen(uci_root_pos, fen_str_collector);
-                   // Check if "moves" follows FEN string
                    if (ss.rdbuf()->in_avail() > 0) {
                         std::string next_word; std::streampos p = ss.tellg(); ss >> next_word;
                         if (next_word == "moves") token = "moves"; else {ss.seekg(p); token = "";}
                    } else token = "";
-                } else { // "moves" was part of FEN string reading, implies FEN might be done
+                } else { 
                     if (!fen_str_collector.empty()) fen_str_collector.pop_back();
-                    parse_fen(uci_root_pos, fen_str_collector); // Parse whatever FEN was collected
+                    parse_fen(uci_root_pos, fen_str_collector); 
                 }
             }
 
@@ -1031,6 +1046,12 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
+            // Ensure TT is initialized before search, if somehow not done yet (e.g. GUI skips isready)
+            if (!g_tt_is_initialized) {
+                init_tt(g_configured_tt_size_mb);
+                g_tt_is_initialized = true;
+            }
+
             int wtime = -1, btime = -1, winc = 0, binc = 0, movestogo = 0;
             long long fixed_time_per_move = -1;
 
@@ -1101,18 +1122,18 @@ void uci_loop() {
 
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
                 if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
-                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall)/2; // Negative for "us mating"
+                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall)/2;
                 std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
                 if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
 
                 if (!uci_best_move_overall.is_null()) {
                      std::cout << " pv " << move_to_uci(uci_best_move_overall);
                 }
-                std::cout << std::endl;
+                std::cout << std::endl; // std::endl flushes
 
                 if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
                 if (search_budget_ms > 0 && elapsed_ms > 0 && depth > 1) {
-                    if (elapsed_ms * 2.5 > search_budget_ms && depth > 3) break; // Be more aggressive if deeper
+                    if (elapsed_ms * 2.5 > search_budget_ms && depth > 3) break;
                     else if (elapsed_ms * 1.8 > search_budget_ms ) break;
                 }
             }
@@ -1133,9 +1154,9 @@ void uci_loop() {
                     }
                 }
                 if (!found_one_legal_fallback && !legal_moves_fallback.empty()){
-                     std::cout << "bestmove " << move_to_uci(legal_moves_fallback[0]) << std::endl; // Risky, might be illegal
+                     std::cout << "bestmove " << move_to_uci(legal_moves_fallback[0]) << std::endl;
                 } else if (!found_one_legal_fallback && legal_moves_fallback.empty()){
-                     std::cout << "bestmove 0000\n";
+                     std::cout << "bestmove 0000\n" << std::flush;
                 }
             }
 
@@ -1152,7 +1173,7 @@ int main(int argc, char* argv[]) {
 
     init_zobrist();
     init_attack_tables();
-    init_tt(TT_SIZE_MB_DEFAULT);
+    // init_tt(g_configured_tt_size_mb); // TT initialization is now deferred
     reset_killers_and_history();
 
     uci_loop();
