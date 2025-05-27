@@ -4,17 +4,17 @@
 #include <sstream>
 #include <chrono>
 #include <algorithm>
-#include <cstring> // For std::memset
+#include <cstring> 
 #include <cstdint>
-#include <random>   // For std::mt19937_64
-#include <cctype>   // For std::isdigit, std::islower, std::tolower
+#include <random>   
+#include <cctype>   
 
-// Bit manipulation builtins (MSVC/GCC specific)
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
 
-// --- Constants ---
+
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
@@ -25,10 +25,10 @@ constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
 
-// Forward Declarations
+
 struct Move;
 struct Position;
-// struct TTEntry; // Defined later
+
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only = false);
@@ -36,10 +36,10 @@ Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 
 
-// --- Zobrist Hashing ---
+
 uint64_t zobrist_pieces[2][6][64];
 uint64_t zobrist_castling[16];
-uint64_t zobrist_ep[65]; // 64 squares + 1 for no EP square (index 64)
+uint64_t zobrist_ep[65]; 
 uint64_t zobrist_side_to_move;
 std::mt19937_64 rng_zobrist(0xCEC);
 
@@ -55,7 +55,7 @@ void init_zobrist() {
     zobrist_side_to_move = rng_zobrist();
 }
 
-// --- Move Structure ---
+
 struct Move {
     int from = 0, to = 0;
     Piece promotion = NO_PIECE;
@@ -86,7 +86,7 @@ std::string move_to_uci(const Move& move) {
     return uci_move_str;
 }
 
-// --- Bitboard Utilities ---
+
 inline uint64_t set_bit(int sq) { return 1ULL << sq; }
 inline bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
 inline int pop_count(uint64_t bb) {
@@ -122,7 +122,7 @@ uint64_t sw(uint64_t b) { return south(west(b)); }
 uint64_t se(uint64_t b) { return south(east(b)); }
 
 
-// --- Board Representation ---
+
 struct Position {
     uint64_t piece_bb[6];
     uint64_t color_bb[2];
@@ -135,7 +135,7 @@ struct Position {
     int ply;
 
     Position() {
-        std::memset(this, 0, sizeof(Position)); // Efficiently zero out
+        std::memset(this, 0, sizeof(Position)); 
         side_to_move = WHITE;
         ep_square = -1;
         fullmove_number = 1;
@@ -160,7 +160,7 @@ struct Position {
     }
 };
 
-// --- Attack Tables Init ---
+
 uint64_t pawn_attacks_bb[2][64];
 uint64_t knight_attacks_bb[64];
 uint64_t king_attacks_bb[64];
@@ -183,17 +183,17 @@ void init_attack_tables() {
     }
 }
 
-// --- Slider Attack Generation ---
+
 uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
-    const int deltas[] = {1, -1, 8, -8}; // E, W, N, S
+    const int deltas[] = {1, -1, 8, -8}; 
     for (int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
             int r_curr = s / 8, c_curr = s % 8;
             int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
             if (abs(d) == 1 && r_curr != r_prev) break;
-            if (abs(d) == 8 && c_curr != c_prev && sq%8 != s%8) break; // Fixed vertical check
+            if (abs(d) == 8 && c_curr != c_prev && sq%8 != s%8) break; 
 
             attacks |= set_bit(s);
             if (get_bit(occupied, s)) break;
@@ -204,7 +204,7 @@ uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
 
 uint64_t get_bishop_attacks_from_sq(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
-    const int deltas[] = {9, -9, 7, -7}; // NE, SW, NW, SE
+    const int deltas[] = {9, -9, 7, -7}; 
     for (int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
@@ -223,11 +223,11 @@ uint64_t get_slider_attacks_for_movegen(int sq, Piece piece_type, uint64_t occup
     if (piece_type == ROOK) return get_rook_attacks_from_sq(sq, occupied);
     if (piece_type == BISHOP) return get_bishop_attacks_from_sq(sq, occupied);
     if (piece_type == QUEEN) return get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
-    return 0; // Should not happen
+    return 0; 
 }
 
 
-// --- is_square_attacked ---
+
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
     if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
@@ -249,7 +249,7 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     return false;
 }
 
-// --- Move Generation ---
+
 void add_move_to_list(std::vector<Move>& moves_list, int from, int to, Piece promotion = NO_PIECE, int score = 0) {
     moves_list.push_back({from, to, promotion, score});
 }
@@ -359,7 +359,7 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
     }
 }
 
-// --- Make Move ---
+
 Position make_move(const Position& pos, const Move& move, bool& legal_move_flag) {
     legal_move_flag = false;
     Position next_pos = pos;
@@ -374,7 +374,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) {
         return pos;
     }
-    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) { // Tried to capture own piece
+    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) { 
         return pos;
     }
 
@@ -413,8 +413,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         if (piece_moved != PAWN) return pos;
         int promotion_rank_actual = (stm == WHITE) ? 7 : 0;
         if (move.to / 8 != promotion_rank_actual) return pos;
-        // piece_bb[PAWN] already cleared from 'from_bb'. Now handle 'to_bb'.
-        // No PAWN bit is set on to_bb yet. Promoted piece will be set.
+        
+        
         next_pos.piece_bb[move.promotion] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
@@ -424,7 +424,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
     }
 
-    uint8_t old_castling_rights = next_pos.castling_rights; // Use current next_pos state
+    uint8_t old_castling_rights = next_pos.castling_rights; 
     if (piece_moved == KING) {
         if (stm == WHITE) next_pos.castling_rights &= ~0x3;
         else next_pos.castling_rights &= ~0xC;
@@ -470,7 +470,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     return next_pos;
 }
 
-// --- Evaluation ---
+
 const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0};
 const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
 
@@ -550,7 +550,7 @@ int evaluate(const Position& pos) {
     return (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
 }
 
-// --- Transposition Table ---
+
 enum TTBound { TT_EXACT, TT_LOWER, TT_UPPER, TT_NONE };
 struct TTEntry {
     uint64_t hash = 0;
@@ -563,7 +563,7 @@ struct TTEntry {
 std::vector<TTEntry> transposition_table;
 uint64_t tt_mask = 0;
 
-// Global TT state for deferred initialization
+
 bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
@@ -584,21 +584,21 @@ void init_tt(size_t mb_size) {
          transposition_table.clear(); tt_mask = 0; return;
     }
     try {
-        transposition_table.assign(power_of_2_entries, TTEntry()); // Clears old and assigns new
+        transposition_table.assign(power_of_2_entries, TTEntry()); 
         tt_mask = power_of_2_entries - 1;
     } catch (const std::bad_alloc&) {
         transposition_table.clear(); tt_mask = 0;
     }
 }
 
-void clear_tt() { // This function is now mostly for explicit clearing if needed, init_tt handles its own.
+void clear_tt() { 
     if (!transposition_table.empty()) {
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
     }
 }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
-    if (tt_mask == 0 || !g_tt_is_initialized) return false; // Check if TT is initialized
+    if (tt_mask == 0 || !g_tt_is_initialized) return false; 
     TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (entry.hash == hash && entry.bound != TT_NONE) {
@@ -618,7 +618,7 @@ bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& mo
 }
 
 void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move) {
-    if (tt_mask == 0 || !g_tt_is_initialized) return; // Check if TT is initialized
+    if (tt_mask == 0 || !g_tt_is_initialized) return; 
     TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (score > MATE_THRESHOLD) score += ply;
@@ -641,7 +641,7 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
     }
 }
 
-// --- Search ---
+
 std::chrono::steady_clock::time_point search_start_timepoint;
 long long search_budget_ms = 0;
 bool stop_search_flag = false;
@@ -679,7 +679,7 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; 
 
 void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_move, int ply) {
     for (Move& m : moves) {
@@ -758,16 +758,16 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     }
 
     if (!is_pv_node && !in_check && can_null_move && depth >= 3 && ply > 0 &&
-        (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 && // Has pieces other than P/K
-        evaluate(pos) >= beta) { // Only if static eval is already good
+        (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 && 
+        evaluate(pos) >= beta) { 
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move;
 
-            null_next_pos.zobrist_hash = pos.zobrist_hash; // Start with current hash
-            null_next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square]; // XOR out old EP
+            null_next_pos.zobrist_hash = pos.zobrist_hash; 
+            null_next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square]; 
             null_next_pos.ep_square = -1;
-            null_next_pos.zobrist_hash ^= zobrist_ep[64]; // XOR in no EP
-            null_next_pos.zobrist_hash ^= zobrist_side_to_move; // Flip side
+            null_next_pos.zobrist_hash ^= zobrist_ep[64]; 
+            null_next_pos.zobrist_hash ^= zobrist_side_to_move; 
             null_next_pos.ply = pos.ply + 1;
 
             int R = (depth > 6) ? 3 : 2;
@@ -803,10 +803,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (legal_moves_played == 1) {
             score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_search_path_hashes);
         } else {
-            int r = 0; // Reduction
+            int r = 0; 
             if (depth >= 3 && i >= (is_pv_node ? 3 : 2) &&
                 !in_check && current_move.promotion == NO_PIECE && pos.piece_on_sq(current_move.to) == NO_PIECE &&
-                current_move.score < 700000) { // Not a capture, TT, or killer
+                current_move.score < 700000) { 
                 r = 1;
                 if (depth >= 5 && i >= (is_pv_node ? 5 : 4)) r = (depth > 7 ? 2 : 1);
                 r = std::min(r, depth - 2);
@@ -856,7 +856,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     return best_score;
 }
 
-// --- UCI ---
+
 Position uci_root_pos;
 Move uci_best_move_overall;
 
@@ -961,7 +961,7 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
 void uci_loop() {
     std::string line, token;
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    // g_configured_tt_size_mb is already TT_SIZE_MB_DEFAULT globally
+    
 
     while (std::getline(std::cin, line)) {
         std::istringstream ss(line);
@@ -971,41 +971,41 @@ void uci_loop() {
             std::cout << "id name Amira\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
-            std::cout << "uciok\n" << std::flush; // Ensure uciok is sent out immediately
+            std::cout << "uciok\n" << std::flush; 
         } else if (token == "isready") {
             if (!g_tt_is_initialized) {
-                init_tt(g_configured_tt_size_mb); // Uses current g_configured_tt_size_mb (default or from setoption)
+                init_tt(g_configured_tt_size_mb); 
                 g_tt_is_initialized = true;
             }
-            std::cout << "readyok\n" << std::flush; // Ensure readyok is sent out immediately
+            std::cout << "readyok\n" << std::flush; 
         } else if (token == "setoption") {
             std::string name_token, value_token, name_str, value_str_val;
             ss >> name_token;
             if (name_token == "name") {
-                ss >> name_str >> value_token >> value_str_val; // Expect "name <option_name> value <option_value>"
+                ss >> name_str >> value_token >> value_str_val; 
                 if (name_str == "Hash") {
                     try {
                         int parsed_size = std::stoi(value_str_val);
-                        g_configured_tt_size_mb = parsed_size; // Update configured size
+                        g_configured_tt_size_mb = parsed_size; 
                     } catch (...) {
-                        // If parsing fails, g_configured_tt_size_mb remains what it was.
-                        // We will initialize with this value in init_tt below.
+                        
+                        
                     }
-                    // (Re)Initialize TT with the (newly) configured or last known valid size.
+                    
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
                 }
             }
         } else if (token == "ucinewgame") {
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-            // (Re)Initialize TT to the currently configured size (or default if never changed)
+            
             init_tt(g_configured_tt_size_mb);
             g_tt_is_initialized = true;
             reset_killers_and_history();
             game_history_hashes.clear();
         } else if (token == "position") {
             std::string fen_str_collector;
-            ss >> token; // "fen" or "startpos"
+            ss >> token; 
             if (token == "startpos") {
                 parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 if (ss.rdbuf()->in_avail() > 0) {
@@ -1046,7 +1046,7 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
-            // Ensure TT is initialized before search, if somehow not done yet (e.g. GUI skips isready)
+            
             if (!g_tt_is_initialized) {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
@@ -1129,7 +1129,7 @@ void uci_loop() {
                 if (!uci_best_move_overall.is_null()) {
                      std::cout << " pv " << move_to_uci(uci_best_move_overall);
                 }
-                std::cout << std::endl; // std::endl flushes
+                std::cout << std::endl; 
 
                 if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
                 if (search_budget_ms > 0 && elapsed_ms > 0 && depth > 1) {
@@ -1173,7 +1173,7 @@ int main(int argc, char* argv[]) {
 
     init_zobrist();
     init_attack_tables();
-    // init_tt(g_configured_tt_size_mb); // TT initialization is now deferred
+    
     reset_killers_and_history();
 
     uci_loop();
