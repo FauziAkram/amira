@@ -28,7 +28,6 @@ constexpr int INF_SCORE = 32000;
 // Forward Declarations
 struct Move;
 struct Position;
-// struct TTEntry; // Defined later
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only = false);
@@ -39,7 +38,7 @@ uint64_t calculate_zobrist_hash(const Position& pos);
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
 uint64_t zobrist_castling[16];
-uint64_t zobrist_ep[65]; // 64 squares + 1 for no EP square (index 64)
+uint64_t zobrist_ep[65];
 uint64_t zobrist_side_to_move;
 std::mt19937_64 rng_zobrist(0xCEC);
 
@@ -135,7 +134,7 @@ struct Position {
     int ply;
 
     Position() {
-        std::memset(this, 0, sizeof(Position)); // Efficiently zero out
+        std::memset(this, 0, sizeof(Position));
         side_to_move = WHITE;
         ep_square = -1;
         fullmove_number = 1;
@@ -186,7 +185,7 @@ void init_attack_tables() {
 // --- Slider Attack Generation ---
 uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
-    const int deltas[] = {1, -1, 8, -8}; // E, W, N, S
+    const int deltas[] = {1, -1, 8, -8};
     for (int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
@@ -204,7 +203,7 @@ uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
 
 uint64_t get_bishop_attacks_from_sq(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
-    const int deltas[] = {9, -9, 7, -7}; // NE, SW, NW, SE
+    const int deltas[] = {9, -9, 7, -7};
     for (int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
@@ -369,12 +368,14 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     uint64_t from_bb = set_bit(move.from);
     uint64_t to_bb = set_bit(move.to);
     Piece piece_moved = pos.piece_on_sq(move.from);
+    Color color_of_moved_piece = pos.color_on_sq(move.from);
     Piece piece_captured = pos.piece_on_sq(move.to);
 
-    if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) {
+    if (piece_moved == NO_PIECE || color_of_moved_piece != (Color)stm) {
+        // This is the primary check for trying to move an empty square or opponent's piece.
         return pos;
     }
-    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) { // Tried to capture own piece
+    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == (Color)stm) {
         return pos;
     }
 
@@ -442,11 +443,10 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
             next_pos.zobrist_hash ^= zobrist_pieces[stm][ROOK][rook_to_sq];
         }
     }
-    // Rook move or capture on rook's starting square
-    if (move.from == 0 || (move.to == 0 && piece_captured == ROOK && pos.color_on_sq(move.to) == WHITE)) next_pos.castling_rights &= ~0x2; // WQ (a1)
-    if (move.from == 7 || (move.to == 7 && piece_captured == ROOK && pos.color_on_sq(move.to) == WHITE)) next_pos.castling_rights &= ~0x1; // WK (h1)
-    if (move.from == 56 || (move.to == 56 && piece_captured == ROOK && pos.color_on_sq(move.to) == BLACK)) next_pos.castling_rights &= ~0x8; // BQ (a8)
-    if (move.from == 63 || (move.to == 63 && piece_captured == ROOK && pos.color_on_sq(move.to) == BLACK)) next_pos.castling_rights &= ~0x4; // BK (h8)
+    if (move.from == 0 || (move.to == 0 && piece_captured == ROOK && pos.color_on_sq(move.to) == WHITE)) next_pos.castling_rights &= ~0x2;
+    if (move.from == 7 || (move.to == 7 && piece_captured == ROOK && pos.color_on_sq(move.to) == WHITE)) next_pos.castling_rights &= ~0x1;
+    if (move.from == 56 || (move.to == 56 && piece_captured == ROOK && pos.color_on_sq(move.to) == BLACK)) next_pos.castling_rights &= ~0x8;
+    if (move.from == 63 || (move.to == 63 && piece_captured == ROOK && pos.color_on_sq(move.to) == BLACK)) next_pos.castling_rights &= ~0x4;
 
 
     if (old_castling_rights != next_pos.castling_rights) {
@@ -461,7 +461,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     next_pos.ply = pos.ply + 1;
 
     int king_sq_after_move = lsb_index(next_pos.piece_bb[KING] & next_pos.color_bb[stm]);
-    if (king_sq_after_move == -1) { return pos; } // Should not happen if KING is mandatory
+    if (king_sq_after_move == -1) { return pos; }
     if (is_square_attacked(next_pos, king_sq_after_move, opp)) {
         return pos;
     }
@@ -536,8 +536,7 @@ int evaluate(const Position& pos) {
             while (b) {
                 int sq = lsb_index(b);
                 b &= b - 1;
-                // Corrected PST mirroring: sq ^ 56 flips the rank for Black
-                int mirrored_sq = (current_eval_color == WHITE) ? sq : (sq ^ 56);
+                int mirrored_sq = (current_eval_color == WHITE) ? sq : (sq ^ 56); // PST FIX
 
                 mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
                 eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
@@ -679,7 +678,7 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0};
 
 void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_move, int ply) {
     for (Move& m : moves) {
@@ -979,7 +978,7 @@ void uci_loop() {
     int current_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
     while (std::getline(std::cin, line)) {
-        // std::cerr << "info string DBG: GUI->Engine: " << line << std::endl; // Uncomment for heavy GUI comm logging
+        // std::cerr << "info string DBG: GUI->Engine: " << line << std::endl;
         std::istringstream ss(line);
         ss >> token;
 
@@ -1008,8 +1007,8 @@ void uci_loop() {
                     }
                 }
             }
-        } else if (token == "ucinewgame") {
-            // std::cerr << "info string DBG: ucinewgame received." << std::endl;
+        } else if (token == "ucinewgame" || token == "new") { // Handle XBoard "new" as well
+            // std::cerr << "info string DBG: ucinewgame/new received." << std::endl;
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
             clear_tt();
             reset_killers_and_history();
@@ -1041,12 +1040,10 @@ void uci_loop() {
                      fen_str_collector.pop_back();
                 }
                 parse_fen(uci_root_pos, fen_str_collector.empty() ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" : fen_str_collector);
-                // std::cerr << "info string DBG: FEN parsed: " << (fen_str_collector.empty() ? "startpos_fen" : fen_str_collector)
-                //           << " side_to_move: " << uci_root_pos.side_to_move << std::endl;
+                // std::cerr << "info string DBG: FEN parsed. Side to move: " << uci_root_pos.side_to_move << std::endl;
             }
 
             game_history_hashes.push_back(uci_root_pos.zobrist_hash);
-
 
             if (token == "moves") {
                 // std::cerr << "info string DBG: Processing moves..." << std::endl;
@@ -1054,13 +1051,15 @@ void uci_loop() {
                 while (ss >> move_str_uci) {
                     // std::cerr << "info string DBG: Applying move: " << move_str_uci << std::endl;
                     Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
-                    if (m.is_null()) { /* std::cerr << "info string DBG: Parsed null move." << std::endl; */ break; }
+                    if (m.is_null()) { break; }
                     bool legal;
                     uci_root_pos = make_move(uci_root_pos, m, legal);
-                    if (!legal) { /* std::cerr << "info string DBG: Applied move was illegal." << std::endl; */ break; }
+                    if (!legal) {
+                        // std::cerr << "info string DBG: GUI sent illegal move in 'position moves': " << move_str_uci << std::endl;
+                        break;
+                    }
                     game_history_hashes.push_back(uci_root_pos.zobrist_hash);
-                    // std::cerr << "info string DBG: Move applied. New side_to_move: " << uci_root_pos.side_to_move
-                    //           << ", new hash: " << uci_root_pos.zobrist_hash << std::endl;
+                    // std::cerr << "info string DBG: Move applied. New side_to_move: " << uci_root_pos.side_to_move << std::endl;
                 }
             }
         } else if (token == "go") {
@@ -1090,7 +1089,7 @@ void uci_loop() {
                         base_time_slice = my_time / movestogo;
                     } else {
                         base_time_slice = my_time / 25;
-                        if (my_time < 15000) base_time_slice = my_time / 15;
+                        if (my_time < 15000 && my_time > 0) base_time_slice = my_time / 15;
                     }
                     search_budget_ms = base_time_slice + my_inc - 50;
                     if (my_time > 100 && search_budget_ms > my_time * 0.8) search_budget_ms = (long long)(my_time * 0.8);
@@ -1107,11 +1106,8 @@ void uci_loop() {
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
             std::vector<uint64_t> root_path_hashes;
-            Move best_move_for_current_depth = NULL_MOVE;
-
 
             for (int depth = 1; depth <= MAX_PLY; ++depth) {
-                best_move_for_current_depth = NULL_MOVE;
                 int current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, root_path_hashes);
 
                 if (stop_search_flag && depth > 1) {
@@ -1119,22 +1115,29 @@ void uci_loop() {
                     break;
                 }
 
-                if (!stop_search_flag) { // Only update if search completed this depth
+                if (!stop_search_flag) {
                     best_score_overall = current_score;
                     Move tt_move_check = NULL_MOVE;
                     int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE, tt_score_check;
-                    // Probe TT for the best move found at *this specific depth*
+
                     if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_move_check, tt_score_check)) {
                         if (!tt_move_check.is_null()) {
-                            // Check if this TT move is from the current depth search, not a shallower one
-                            TTEntry& entry = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
-                            if(entry.hash == uci_root_pos.zobrist_hash && entry.depth >= depth){
+                            Color color_of_piece_on_from_sq = uci_root_pos.color_on_sq(tt_move_check.from);
+                            if (color_of_piece_on_from_sq == uci_root_pos.side_to_move) { // CRITICAL CHECK
                                 uci_best_move_overall = tt_move_check;
                                 // std::cerr << "info string DBG: uci_best_move_overall updated from TT: " << move_to_uci(uci_best_move_overall) << " at depth " << depth << std::endl;
+                            } else {
+                                // std::cerr << "info string DBG: TT Move " << move_to_uci(tt_move_check) << " for wrong color rejected. STM=" << uci_root_pos.side_to_move << std::endl;
                             }
                         }
+                    } else if (uci_best_move_overall.is_null()){ // If TT fails and we still have no best move
+                        // This part is tricky. Search must return the best_move_found for the root.
+                        // For now, we rely on the TT to have been populated by search.
+                        // If TT is off, this path relies on the last valid uci_best_move_overall.
+                        // If after a search uci_best_move_overall is STILL null, then fallback is triggered.
                     }
                 }
+
 
                 auto now_tp = std::chrono::steady_clock::now();
                 auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
@@ -1159,7 +1162,7 @@ void uci_loop() {
             }
 
             if (!uci_best_move_overall.is_null()) {
-                // std::cerr << "info string DBG: Sending bestmove: " << move_to_uci(uci_best_move_overall) << std::endl;
+                 // std::cerr << "info string DBG: Sending bestmove: " << move_to_uci(uci_best_move_overall) << std::endl;
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
             } else {
                 // std::cerr << "info string DBG: Fallback logic entered. uci_root_pos.side_to_move: " << uci_root_pos.side_to_move << std::endl;
@@ -1176,12 +1179,10 @@ void uci_loop() {
                         std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
                         found_one_legal_fallback = true;
                         break;
-                    } // else {
-                        // std::cerr << "info string DBG: Fallback move " << move_to_uci(m_fall) << " was illegal." << std::endl;
-                    // }
+                    }
                 }
                 if (!found_one_legal_fallback) {
-                    // std::cerr << "info string DBG: Fallback found NO legal moves. Sending 0000." << std::endl;
+                     // std::cerr << "info string DBG: Fallback found NO legal moves. Sending 0000." << std::endl;
                      std::cout << "bestmove 0000\n";
                 }
             }
@@ -1191,9 +1192,10 @@ void uci_loop() {
             stop_search_flag = true;
             if (token == "quit") break;
         }
-        else { // Unknown command
-             // std::cerr << "info string DBG: Unknown command: " << token << std::endl;
-        }
+        // Removed the generic else block that parsed unknown tokens as moves.
+        // This enforces stricter UCI compliance.
+        // If Arena (or other GUI) sends XBoard-style moves outside 'position moves',
+        // they will be ignored.
     }
 }
 
