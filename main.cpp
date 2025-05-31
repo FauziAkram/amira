@@ -1,12 +1,8 @@
-#include <iostream>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <chrono>
-#include <algorithm>
-#include <cstring> // For std::memset
+#include <cstdio>   // For printf, fgets, sscanf, sprintf, fflush
+#include <cstring>  // For std::memset, strcpy, strlen, strcmp
 #include <cstdint>
-#include <random>   // For std::mt19937_64
+#include <cstdlib>  // For atoi
+#include <ctime>    // For clock_t, clock, CLOCKS_PER_SEC
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 
 // Bit manipulation builtins (MSVC/GCC specific)
@@ -19,7 +15,13 @@ enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 64;
-constexpr int TT_SIZE_MB_DEFAULT = 8;
+constexpr int MAX_MOVES_PER_PLY = 256; // Max legal moves in a position
+constexpr int MAX_GAME_HISTORY_PLY = 1024; // Max ply for game history (for 3-fold rep)
+
+// --- TT placeholders (will likely be removed/simplified for 4k) ---
+constexpr int TT_SIZE_MB_DEFAULT = 0; // Defaulting to 0MB, essentially disabling for now
+// --- End TT placeholders ---
+
 
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
@@ -28,31 +30,36 @@ constexpr int INF_SCORE = 32000;
 // Forward Declarations
 struct Move;
 struct Position;
-// struct TTEntry; // Defined later
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
-void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only = false);
+int generate_moves(const Position& pos, Move moves_list[], bool captures_only = false); // Returns count
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 
+
+// --- Tiny PRNG for Zobrist (if kept) ---
+uint64_t g_zobrist_seed = 0xCEC;
+uint64_t tiny_rand64() {
+    g_zobrist_seed = g_zobrist_seed * 6364136223846793005ULL + 1442695040888963407ULL;
+    return g_zobrist_seed;
+}
 
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
 uint64_t zobrist_castling[16];
 uint64_t zobrist_ep[65]; // 64 squares + 1 for no EP square (index 64)
 uint64_t zobrist_side_to_move;
-std::mt19937_64 rng_zobrist(0xCEC);
 
 void init_zobrist() {
     for (int c = 0; c < 2; ++c)
         for (int p = 0; p < 6; ++p)
             for (int s = 0; s < 64; ++s)
-                zobrist_pieces[c][p][s] = rng_zobrist();
+                zobrist_pieces[c][p][s] = tiny_rand64();
     for (int i = 0; i < 16; ++i)
-        zobrist_castling[i] = rng_zobrist();
+        zobrist_castling[i] = tiny_rand64();
     for (int i = 0; i < 65; ++i)
-        zobrist_ep[i] = rng_zobrist();
-    zobrist_side_to_move = rng_zobrist();
+        zobrist_ep[i] = tiny_rand64();
+    zobrist_side_to_move = tiny_rand64();
 }
 
 // --- Move Structure ---
@@ -69,21 +76,25 @@ struct Move {
 
 const Move NULL_MOVE = {0, 0, NO_PIECE, 0};
 
-std::string move_to_uci(const Move& move) {
-    if (move.is_null()) return "0000";
-    std::string uci_move_str;
-    uci_move_str += (char)('a' + (move.from % 8));
-    uci_move_str += (char)('1' + (move.from / 8));
-    uci_move_str += (char)('a' + (move.to % 8));
-    uci_move_str += (char)('1' + (move.to / 8));
+// Buffer for move_to_uci must be at least 6 chars ("a1a2q\0")
+void move_to_uci(const Move& move, char* uci_move_str) {
+    if (move.is_null()) {
+        strcpy(uci_move_str, "0000");
+        return;
+    }
+    uci_move_str[0] = (char)('a' + (move.from % 8));
+    uci_move_str[1] = (char)('1' + (move.from / 8));
+    uci_move_str[2] = (char)('a' + (move.to % 8));
+    uci_move_str[3] = (char)('1' + (move.to / 8));
+    int len = 4;
     if (move.promotion != NO_PIECE) {
         char promo_char = 'q';
         if (move.promotion == KNIGHT) promo_char = 'n';
         else if (move.promotion == BISHOP) promo_char = 'b';
         else if (move.promotion == ROOK) promo_char = 'r';
-        uci_move_str += promo_char;
+        uci_move_str[len++] = promo_char;
     }
-    return uci_move_str;
+    uci_move_str[len] = '\0';
 }
 
 // --- Bitboard Utilities ---
@@ -146,8 +157,8 @@ struct Position {
     Piece piece_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_PIECE;
         uint64_t b = set_bit(sq);
-        for (int p = PAWN; p <= KING; ++p) {
-            if (piece_bb[p] & b) return (Piece)p;
+        for (int p_idx = PAWN; p_idx <= KING; ++p_idx) {
+            if (piece_bb[p_idx] & b) return (Piece)p_idx;
         }
         return NO_PIECE;
     }
@@ -193,7 +204,7 @@ uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
             int r_curr = s / 8, c_curr = s % 8;
             int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
             if (abs(d) == 1 && r_curr != r_prev) break;
-            if (abs(d) == 8 && c_curr != c_prev && sq%8 != s%8) break; // Fixed vertical check
+            if (abs(d) == 8 && c_curr != c_prev && sq%8 != s%8) break; 
 
             attacks |= set_bit(s);
             if (get_bit(occupied, s)) break;
@@ -223,7 +234,7 @@ uint64_t get_slider_attacks_for_movegen(int sq, Piece piece_type, uint64_t occup
     if (piece_type == ROOK) return get_rook_attacks_from_sq(sq, occupied);
     if (piece_type == BISHOP) return get_bishop_attacks_from_sq(sq, occupied);
     if (piece_type == QUEEN) return get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
-    return 0; // Should not happen
+    return 0;
 }
 
 
@@ -250,12 +261,15 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
 }
 
 // --- Move Generation ---
-void add_move_to_list(std::vector<Move>& moves_list, int from, int to, Piece promotion = NO_PIECE, int score = 0) {
-    moves_list.push_back({from, to, promotion, score});
+// Now returns count and takes array + pointer to count
+void add_move_to_list(Move moves_array[], int& move_count, int from, int to, Piece promotion = NO_PIECE, int score = 0) {
+    if (move_count < MAX_MOVES_PER_PLY) {
+        moves_array[move_count++] = {from, to, promotion, score};
+    }
 }
 
-void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only) {
-    moves_list.clear();
+int generate_moves(const Position& pos, Move moves_list[], bool captures_only) {
+    int move_count = 0;
     int stm = pos.side_to_move;
     Color friendly_color = (Color)stm;
     Color enemy_color = (Color)(1 - stm);
@@ -275,17 +289,17 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
         if (one_step_sq >=0 && one_step_sq < 64 && get_bit(empty_squares, one_step_sq)) {
             if (!captures_only) {
                 if (rank == promotion_rank_idx) {
-                    add_move_to_list(moves_list, from, one_step_sq, QUEEN); add_move_to_list(moves_list, from, one_step_sq, ROOK);
-                    add_move_to_list(moves_list, from, one_step_sq, BISHOP); add_move_to_list(moves_list, from, one_step_sq, KNIGHT);
+                    add_move_to_list(moves_list, move_count, from, one_step_sq, QUEEN); add_move_to_list(moves_list, move_count, from, one_step_sq, ROOK);
+                    add_move_to_list(moves_list, move_count, from, one_step_sq, BISHOP); add_move_to_list(moves_list, move_count, from, one_step_sq, KNIGHT);
                 } else {
-                    add_move_to_list(moves_list, from, one_step_sq);
+                    add_move_to_list(moves_list, move_count, from, one_step_sq);
                 }
             }
             int start_rank_idx = (stm == WHITE) ? 1 : 6;
             if (rank == start_rank_idx) {
                 int two_steps_sq = (stm == WHITE) ? from + 16 : from - 16;
                 if (two_steps_sq >=0 && two_steps_sq < 64 && get_bit(empty_squares, two_steps_sq) && !captures_only) {
-                    add_move_to_list(moves_list, from, two_steps_sq);
+                    add_move_to_list(moves_list, move_count, from, two_steps_sq);
                 }
             }
         }
@@ -299,10 +313,10 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
             int to = lsb_index(pawn_cap_targets);
             pawn_cap_targets &= pawn_cap_targets - 1;
             if (rank == promotion_rank_idx) {
-                add_move_to_list(moves_list, from, to, QUEEN); add_move_to_list(moves_list, from, to, ROOK);
-                add_move_to_list(moves_list, from, to, BISHOP); add_move_to_list(moves_list, from, to, KNIGHT);
+                add_move_to_list(moves_list, move_count, from, to, QUEEN); add_move_to_list(moves_list, move_count, from, to, ROOK);
+                add_move_to_list(moves_list, move_count, from, to, BISHOP); add_move_to_list(moves_list, move_count, from, to, KNIGHT);
             } else {
-                add_move_to_list(moves_list, from, to);
+                add_move_to_list(moves_list, move_count, from, to);
             }
         }
     }
@@ -324,7 +338,7 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
             while (attacks) {
                 int to = lsb_index(attacks);
                 attacks &= attacks - 1;
-                add_move_to_list(moves_list, from, to);
+                add_move_to_list(moves_list, move_count, from, to);
             }
         }
     }
@@ -336,30 +350,32 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
                 if ((pos.castling_rights & 1) && king_sq == 4 &&
                     !get_bit(occupied, 5) && !get_bit(occupied, 6) &&
                     !is_square_attacked(pos, 4, BLACK) && !is_square_attacked(pos, 5, BLACK) && !is_square_attacked(pos, 6, BLACK)) {
-                    add_move_to_list(moves_list, king_sq, 6);
+                    add_move_to_list(moves_list, move_count, king_sq, 6);
                 }
                 if ((pos.castling_rights & 2) && king_sq == 4 &&
                     !get_bit(occupied, 3) && !get_bit(occupied, 2) && !get_bit(occupied, 1) &&
                     !is_square_attacked(pos, 4, BLACK) && !is_square_attacked(pos, 3, BLACK) && !is_square_attacked(pos, 2, BLACK)) {
-                    add_move_to_list(moves_list, king_sq, 2);
+                    add_move_to_list(moves_list, move_count, king_sq, 2);
                 }
-            } else {
+            } else { // BLACK
                 if ((pos.castling_rights & 4) && king_sq == 60 &&
                     !get_bit(occupied, 61) && !get_bit(occupied, 62) &&
                     !is_square_attacked(pos, 60, WHITE) && !is_square_attacked(pos, 61, WHITE) && !is_square_attacked(pos, 62, WHITE)) {
-                    add_move_to_list(moves_list, king_sq, 62);
+                    add_move_to_list(moves_list, move_count, king_sq, 62);
                 }
                 if ((pos.castling_rights & 8) && king_sq == 60 &&
                     !get_bit(occupied, 59) && !get_bit(occupied, 58) && !get_bit(occupied, 57) &&
                     !is_square_attacked(pos, 60, WHITE) && !is_square_attacked(pos, 59, WHITE) && !is_square_attacked(pos, 58, WHITE)) {
-                    add_move_to_list(moves_list, king_sq, 58);
+                    add_move_to_list(moves_list, move_count, king_sq, 58);
                 }
             }
         }
     }
+    return move_count;
 }
 
-// --- Make Move ---
+// --- Make Move --- (Zobrist parts are still here, will be removed if TT is fully removed)
+// (Identical to original, but Zobrist will be removed with TT)
 Position make_move(const Position& pos, const Move& move, bool& legal_move_flag) {
     legal_move_flag = false;
     Position next_pos = pos;
@@ -374,17 +390,15 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) {
         return pos;
     }
-    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) { // Tried to capture own piece
+    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) { 
         return pos;
     }
-
 
     next_pos.zobrist_hash = pos.zobrist_hash;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
 
     next_pos.piece_bb[piece_moved] &= ~from_bb;
     next_pos.color_bb[stm] &= ~from_bb;
-
     next_pos.halfmove_clock++;
 
     if (piece_captured != NO_PIECE) {
@@ -413,8 +427,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         if (piece_moved != PAWN) return pos;
         int promotion_rank_actual = (stm == WHITE) ? 7 : 0;
         if (move.to / 8 != promotion_rank_actual) return pos;
-        // piece_bb[PAWN] already cleared from 'from_bb'. Now handle 'to_bb'.
-        // No PAWN bit is set on to_bb yet. Promoted piece will be set.
         next_pos.piece_bb[move.promotion] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
@@ -424,7 +436,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
     }
 
-    uint8_t old_castling_rights = next_pos.castling_rights; // Use current next_pos state
+    uint8_t old_castling_rights = next_pos.castling_rights;
     if (piece_moved == KING) {
         if (stm == WHITE) next_pos.castling_rights &= ~0x3;
         else next_pos.castling_rights &= ~0xC;
@@ -456,7 +468,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     next_pos.side_to_move = opp;
     next_pos.zobrist_hash ^= zobrist_side_to_move;
-
     if (stm == BLACK) next_pos.fullmove_number++;
     next_pos.ply = pos.ply + 1;
 
@@ -470,144 +481,84 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     return next_pos;
 }
 
-// --- Evaluation ---
+
+// --- Evaluation (PSTs are large, potential target for removal/simplification later) ---
+// (Identical to original)
 const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0};
 const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
-
-const int pawn_pst[64] = {
-     0,  0,  0,  0,  0,  0,  0,  0,   5, 10, 10,-20,-20, 10, 10,  5,
-     5, -5,-10,  0,  0,-10, -5,  5,   0,  0,  0, 20, 20,  0,  0,  0,
-     5,  5, 10, 25, 25, 10,  5,  5,  10, 10, 20, 30, 30, 20, 10, 10,
-    50, 50, 50, 50, 50, 50, 50, 50,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int knight_pst[64] = {
-    -50,-40,-30,-30,-30,-30,-40,-50, -40,-20,  0,  5,  5,  0,-20,-40,
-    -30,  5, 10, 15, 15, 10,  5,-30, -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30, -30,  0, 10, 15, 15, 10,  0,-30,
-    -40,-20,  0,  0,  0,  0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50
-};
-const int bishop_pst[64] = {
-    -20,-10,-10,-10,-10,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10, -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10, -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10, -20,-10,-10,-10,-10,-10,-10,-20
-};
-const int rook_pst[64] = {
-     0,  0,  0,  5,  5,  0,  0,  0,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-     5, 10, 10, 10, 10, 10, 10,  5,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int queen_pst[64] = {
-    -20,-10,-10, -5, -5,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,  -5,  0,  5,  5,  5,  5,  0, -5,
-      0,  0,  5,  5,  5,  5,  0, -5, -10,  0,  5,  5,  5,  5,  0,-10,
-    -10,  0,  0,  0,  0,  0,  0,-10, -20,-10,-10, -5, -5,-10,-10,-20
-};
-const int king_pst_mg[64] = {
-     20, 30, 10,  0,  0, 10, 30, 20,  20, 20,  0,  0,  0,  0, 20, 20,
-    -10,-20,-20,-20,-20,-20,-20,-10, -20,-30,-30,-40,-40,-30,-30,-20,
-    -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30
-};
-const int king_pst_eg[64] = {
-   -50,-30,-30,-30,-30,-30,-30,-50, -30,-10, 20, 30, 30, 20,-10,-30,
-   -30, 10, 30, 40, 40, 30, 10,-30, -30, 10, 40, 50, 50, 40, 10,-30,
-   -30, 10, 40, 50, 50, 40, 10,-30, -30, 10, 30, 40, 40, 30, 10,-30,
-   -30,-10, 20, 30, 30, 20,-10,-30, -50,-30,-30,-30,-30,-30,-30,-50
-};
-
+const int pawn_pst[64] = {0,0,0,0,0,0,0,0,5,10,10,-20,-20,10,10,5,5,-5,-10,0,0,-10,-5,5,0,0,0,20,20,0,0,0,5,5,10,25,25,10,5,5,10,10,20,30,30,20,10,10,50,50,50,50,50,50,50,50,0,0,0,0,0,0,0,0};
+const int knight_pst[64]={-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,0,5,5,0,-20,-40,-30,5,10,15,15,10,5,-30,-30,0,15,20,20,15,0,-30,-30,5,15,20,20,15,5,-30,-30,0,10,15,15,10,0,-30,-40,-20,0,0,0,0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50};
+const int bishop_pst[64]={-20,-10,-10,-10,-10,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,10,10,5,0,-10,-10,5,5,10,10,5,5,-10,-10,0,10,10,10,10,0,-10,-10,10,10,10,10,10,10,-10,-10,5,0,0,0,0,5,-10,-20,-10,-10,-10,-10,-10,-10,-20};
+const int rook_pst[64]={0,0,0,5,5,0,0,0,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,5,10,10,10,10,10,10,5,0,0,0,0,0,0,0,0};
+const int queen_pst[64]={-20,-10,-10,-5,-5,-10,-10,-20,-10,0,0,0,0,0,0,-10,-10,0,5,5,5,5,0,-10,-5,0,5,5,5,5,0,-5,0,0,5,5,5,5,0,-5,-10,0,5,5,5,5,0,-10,-10,0,0,0,0,0,0,-10,-20,-10,-10,-5,-5,-10,-10,-20};
+const int king_pst_mg[64]={20,30,10,0,0,10,30,20,20,20,0,0,0,0,20,20,-10,-20,-20,-20,-20,-20,-20,-10,-20,-30,-30,-40,-40,-30,-30,-20,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30};
+const int king_pst_eg[64]={-50,-30,-30,-30,-30,-30,-30,-50,-30,-10,20,30,30,20,-10,-30,-30,10,30,40,40,30,10,-30,-30,10,40,50,50,40,10,-30,-30,10,40,50,50,40,10,-30,-30,10,30,40,40,30,10,-30,-30,-10,20,30,30,20,-10,-30,-50,-30,-30,-30,-30,-30,-30,-50};
 const int* pst_mg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_mg};
 const int* pst_eg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_eg};
 const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0};
-
 int evaluate(const Position& pos) {
-    int mg_score = 0;
-    int eg_score = 0;
-    int game_phase = 0;
-
+    int mg_score = 0; int eg_score = 0; int game_phase = 0;
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
-
-        for (int p = PAWN; p <= KING; ++p) {
-            uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
-            game_phase += pop_count(b) * game_phase_inc[p];
+        for (int p_idx = PAWN; p_idx <= KING; ++p_idx) {
+            uint64_t b = pos.piece_bb[p_idx] & pos.color_bb[current_eval_color];
+            game_phase += pop_count(b) * game_phase_inc[p_idx];
             while (b) {
-                int sq = lsb_index(b);
-                b &= b - 1;
+                int sq = lsb_index(b); b &= b - 1;
                 int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
-
-                mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
-                eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
+                mg_score += side_multiplier * (piece_values_mg[p_idx] + pst_mg_all[p_idx][mirrored_sq]);
+                eg_score += side_multiplier * (piece_values_eg[p_idx] + pst_eg_all[p_idx][mirrored_sq]);
             }
         }
     }
-    if (game_phase > 24) game_phase = 24;
-    if (game_phase < 0) game_phase = 0;
-
+    if (game_phase > 24) game_phase = 24; if (game_phase < 0) game_phase = 0;
     int final_score_from_white_pov = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
     return (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
 }
 
-// --- Transposition Table ---
+// --- Transposition Table (Using C-style array, will be simplified/removed later) ---
 enum TTBound { TT_EXACT, TT_LOWER, TT_UPPER, TT_NONE };
 struct TTEntry {
-    uint64_t hash = 0;
-    Move best_move = NULL_MOVE;
-    int score = 0;
-    int depth = 0;
-    TTBound bound = TT_NONE;
+    uint64_t hash = 0; Move best_move = NULL_MOVE; int score = 0; int depth = 0; TTBound bound = TT_NONE;
 };
-
-std::vector<TTEntry> transposition_table;
-uint64_t tt_mask = 0;
-
-// Global TT state for deferred initialization
+constexpr size_t TT_MAX_ENTRIES = (TT_SIZE_MB_DEFAULT > 0) ? (TT_SIZE_MB_DEFAULT * 1024 * 1024 / sizeof(TTEntry)) : 0; // Placeholder
+TTEntry transposition_table[TT_MAX_ENTRIES > 0 ? TT_MAX_ENTRIES : 1]; // Avoid zero-size array if TT_SIZE_MB_DEFAULT is 0
+uint64_t tt_mask = (TT_MAX_ENTRIES > 0) ? TT_MAX_ENTRIES -1 : 0; // Ensure it's power of 2 if used
 bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
-
-void init_tt(size_t mb_size) {
-    if (mb_size == 0) {
-        transposition_table.clear(); tt_mask = 0; return;
-    }
-    size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
-    if (num_entries == 0) {
-        transposition_table.clear(); tt_mask = 0; return;
-    }
-    size_t power_of_2_entries = 1;
-    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) {
-        power_of_2_entries *= 2;
-    }
-     if (power_of_2_entries == 0) {
-         transposition_table.clear(); tt_mask = 0; return;
-    }
-    try {
-        transposition_table.assign(power_of_2_entries, TTEntry()); // Clears old and assigns new
-        tt_mask = power_of_2_entries - 1;
-    } catch (const std::bad_alloc&) {
-        transposition_table.clear(); tt_mask = 0;
+void init_tt(size_t mb_size) { /* TT init logic simplified/deferred for 4k. For now, just clear. */
+    if (TT_MAX_ENTRIES > 0) {
+        std::memset(transposition_table, 0, sizeof(transposition_table));
+        // Real init would calculate power_of_2_entries and set tt_mask
+        // For now, if TT_SIZE_MB_DEFAULT is 0, tt_mask will be 0, disabling TT
+        if (mb_size > 0) {
+             size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
+             size_t power_of_2_entries = 1;
+             while(power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) power_of_2_entries *=2;
+             if(power_of_2_entries > 0) tt_mask = power_of_2_entries -1; else tt_mask = 0;
+             // Note: This doesn't resize the global array, which is fixed at compile time now.
+             // This init_tt is mostly for setting the mask if a size > 0 was intended.
+        } else {
+            tt_mask = 0;
+        }
+    } else {
+        tt_mask = 0;
     }
 }
-
-void clear_tt() { // This function is now mostly for explicit clearing if needed, init_tt handles its own.
-    if (!transposition_table.empty()) {
-        std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
-    }
-}
+void clear_tt() { if (TT_MAX_ENTRIES > 0) std::memset(transposition_table, 0, sizeof(transposition_table)); }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
-    if (tt_mask == 0 || !g_tt_is_initialized) return false; // Check if TT is initialized
-    TTEntry& entry = transposition_table[hash & tt_mask];
-
+    if (tt_mask == 0 || !g_tt_is_initialized || TT_MAX_ENTRIES == 0) return false;
+    TTEntry& entry = transposition_table[hash & tt_mask]; // tt_mask needs to be calculated correctly if TT is used
+    // ... rest of probe_tt logic (identical)
     if (entry.hash == hash && entry.bound != TT_NONE) {
         move_from_tt = entry.best_move;
         if (entry.depth >= depth) {
             int stored_score = entry.score;
             if (stored_score > MATE_THRESHOLD) stored_score -= ply;
             else if (stored_score < -MATE_THRESHOLD) stored_score += ply;
-
             score_from_tt = stored_score;
             if (entry.bound == TT_EXACT) return true;
             if (entry.bound == TT_LOWER && stored_score >= beta) return true;
@@ -616,61 +567,39 @@ bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& mo
     }
     return false;
 }
-
 void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move) {
-    if (tt_mask == 0 || !g_tt_is_initialized) return; // Check if TT is initialized
-    TTEntry& entry = transposition_table[hash & tt_mask];
-
-    if (score > MATE_THRESHOLD) score += ply;
-    else if (score < -MATE_THRESHOLD) score -= ply;
-
-    bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
-                          (depth > entry.depth) ||
-                          (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
-                          (depth == entry.depth && entry.bound == TT_NONE);
-
-
-    if (should_replace) {
-        entry.hash = hash;
-        entry.depth = depth;
-        entry.score = score;
-        entry.bound = bound;
-        if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER) {
-             entry.best_move = best_move;
-        }
-    }
+    if (tt_mask == 0 || !g_tt_is_initialized || TT_MAX_ENTRIES == 0) return;
+    TTEntry& entry = transposition_table[hash & tt_mask]; // tt_mask needs to be calculated
+    // ... rest of store_tt logic (identical)
+    if (score > MATE_THRESHOLD) score += ply; else if (score < -MATE_THRESHOLD) score -= ply;
+    bool should_replace = (entry.hash == 0)||(entry.hash != hash)||(depth > entry.depth)||(depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT)||(depth == entry.depth && entry.bound == TT_NONE);
+    if(should_replace){entry.hash=hash;entry.depth=depth;entry.score=score;entry.bound=bound;if(!best_move.is_null()||entry.hash!=hash||bound==TT_EXACT||bound==TT_LOWER){entry.best_move=best_move;}}
 }
 
 // --- Search ---
-std::chrono::steady_clock::time_point search_start_timepoint;
+clock_t search_start_clock_time; // Replaces std::chrono::steady_clock::time_point
 long long search_budget_ms = 0;
 bool stop_search_flag = false;
 uint64_t nodes_searched = 0;
 
 Move killer_moves[MAX_PLY][2];
-int history_heuristic[2][64][64];
-std::vector<uint64_t> game_history_hashes;
+int history_heuristic[2][64][64]; // This is huge (32KB), must remove for 4k
+uint64_t game_history_hashes[MAX_GAME_HISTORY_PLY]; // Fixed-size array
+int game_history_count = 0;
 
-void reset_search_state() {
-    nodes_searched = 0;
-    stop_search_flag = false;
-}
-
+void reset_search_state() { nodes_searched = 0; stop_search_flag = false; }
 void reset_killers_and_history() {
-    for(int i=0; i<MAX_PLY; ++i) {
-        killer_moves[i][0] = NULL_MOVE;
-        killer_moves[i][1] = NULL_MOVE;
-    }
+    for(int i=0; i<MAX_PLY; ++i) { killer_moves[i][0] = NULL_MOVE; killer_moves[i][1] = NULL_MOVE; }
     std::memset(history_heuristic, 0, sizeof(history_heuristic));
 }
 
 bool check_time() {
     if (stop_search_flag) return true;
-    if ((nodes_searched & 2047) == 0) {
+    if ((nodes_searched & 2047) == 0) { // Check every 2048 nodes
         if (search_budget_ms > 0) {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - search_start_timepoint).count();
-            if (elapsed >= search_budget_ms) {
+            clock_t current_clock = clock();
+            long long elapsed_ms = (current_clock - search_start_clock_time) * 1000LL / CLOCKS_PER_SEC;
+            if (elapsed_ms >= search_budget_ms) {
                 stop_search_flag = true;
                 return true;
             }
@@ -679,16 +608,31 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0};
 
-void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_move, int ply) {
-    for (Move& m : moves) {
+// Basic insertion sort
+void sort_moves_array(Move arr[], int n) {
+    int i, j;
+    Move key;
+    for (i = 1; i < n; i++) {
+        key = arr[i];
+        j = i - 1;
+        while (j >= 0 && arr[j].score < key.score) { // Sort descending
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+    }
+}
+
+void score_moves(const Position& pos, Move moves[], int num_moves, const Move& tt_move, int ply) {
+    for (int i = 0; i < num_moves; ++i) {
+        Move& m = moves[i];
         if (!tt_move.is_null() && m == tt_move) {
             m.score = 2000000;
         } else {
             Piece moved_piece = pos.piece_on_sq(m.from);
             Piece captured_piece = pos.piece_on_sq(m.to);
-
             if (captured_piece != NO_PIECE) {
                 m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
             } else if (m.promotion != NO_PIECE) {
@@ -698,11 +642,11 @@ void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_m
             } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
                 m.score = 700000;
             } else {
-                m.score = history_heuristic[pos.side_to_move][m.from][m.to];
+                m.score = history_heuristic[pos.side_to_move][m.from][m.to]; // History heuristic is a target for removal
             }
         }
     }
-    std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b){ return a.score > b.score; });
+    sort_moves_array(moves, num_moves);
 }
 
 int quiescence_search(Position& pos, int alpha, int beta, int ply) {
@@ -713,13 +657,14 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     if (stand_pat >= beta) return beta;
     if (alpha < stand_pat) alpha = stand_pat;
 
-    std::vector<Move> captures;
-    generate_moves(pos, captures, true);
+    Move captures[MAX_MOVES_PER_PLY];
+    int num_captures = generate_moves(pos, captures, true);
 
     Move dummy_tt_move = NULL_MOVE;
-    score_moves(pos, captures, dummy_tt_move, ply);
+    score_moves(pos, captures, num_captures, dummy_tt_move, ply);
 
-    for (const Move& cap_move : captures) {
+    for (int i=0; i < num_captures; ++i) {
+        const Move& cap_move = captures[i];
         bool legal;
         Position next_pos = make_move(pos, cap_move, legal);
         if (!legal) continue;
@@ -731,17 +676,23 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     return alpha;
 }
 
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, std::vector<uint64_t>& current_search_path_hashes) {
+// current_search_path_hashes changed to C-array
+uint64_t current_search_path_hashes_arr[MAX_PLY];
+
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
     nodes_searched++;
     if (check_time()) return 0;
     if (ply >= MAX_PLY -1) return evaluate(pos);
 
-    for (uint64_t path_hash : current_search_path_hashes) {
-        if (path_hash == pos.zobrist_hash) return 0;
+    // Repetition check with current path
+    for (int i = 0; i < ply; ++i) { // Only check up to current ply
+        if (current_search_path_hashes_arr[i] == pos.zobrist_hash) return 0;
     }
+    // Game history repetition check
     int game_reps = 0;
-    for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
+    for(int i=0; i < game_history_count; ++i) if(game_history_hashes[i] == pos.zobrist_hash) game_reps++;
     if(game_reps >= 2 && ply > 0) return 0;
+
 
     if (pos.halfmove_clock >= 100 && ply > 0) return 0;
 
@@ -758,22 +709,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     }
 
     if (!is_pv_node && !in_check && can_null_move && depth >= 3 && ply > 0 &&
-        (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 && // Has pieces other than P/K
-        evaluate(pos) >= beta) { // Only if static eval is already good
+        (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 &&
+        evaluate(pos) >= beta) {
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move;
-
-            null_next_pos.zobrist_hash = pos.zobrist_hash; // Start with current hash
-            null_next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square]; // XOR out old EP
+            null_next_pos.zobrist_hash = pos.zobrist_hash;
+            null_next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
             null_next_pos.ep_square = -1;
-            null_next_pos.zobrist_hash ^= zobrist_ep[64]; // XOR in no EP
-            null_next_pos.zobrist_hash ^= zobrist_side_to_move; // Flip side
+            null_next_pos.zobrist_hash ^= zobrist_ep[64];
+            null_next_pos.zobrist_hash ^= zobrist_side_to_move;
             null_next_pos.ply = pos.ply + 1;
-
             int R = (depth > 6) ? 3 : 2;
-            current_search_path_hashes.push_back(pos.zobrist_hash);
-            int null_score = -search(null_next_pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false, false, current_search_path_hashes);
-            current_search_path_hashes.pop_back();
+            
+            current_search_path_hashes_arr[ply] = pos.zobrist_hash; // Add to path
+            int null_score = -search(null_next_pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false, false);
+            // No explicit pop needed as it's overwritten or not used beyond ply
 
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -781,17 +731,17 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-    std::vector<Move> moves;
-    generate_moves(pos, moves);
-    score_moves(pos, moves, tt_move, ply);
+    Move moves[MAX_MOVES_PER_PLY];
+    int num_moves = generate_moves(pos, moves);
+    score_moves(pos, moves, num_moves, tt_move, ply);
 
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash);
+    current_search_path_hashes_arr[ply] = pos.zobrist_hash; // Add to path
 
-    for (int i = 0; i < (int)moves.size(); ++i) {
+    for (int i = 0; i < num_moves; ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
@@ -801,29 +751,28 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         int score;
 
         if (legal_moves_played == 1) {
-            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_search_path_hashes);
+            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true);
         } else {
-            int r = 0; // Reduction
+            int r = 0; 
             if (depth >= 3 && i >= (is_pv_node ? 3 : 2) &&
                 !in_check && current_move.promotion == NO_PIECE && pos.piece_on_sq(current_move.to) == NO_PIECE &&
-                current_move.score < 700000) { // Not a capture, TT, or killer
+                current_move.score < 700000) { 
                 r = 1;
                 if (depth >= 5 && i >= (is_pv_node ? 5 : 4)) r = (depth > 7 ? 2 : 1);
-                r = std::min(r, depth - 2);
+                // r = std::min(r, depth - 2); // std::min from <algorithm>
+                if (r > depth - 2) r = depth - 2;
                 if (r < 0) r = 0;
             }
-
-            score = -search(next_pos, depth - 1 - r, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
-
+            score = -search(next_pos, depth - 1 - r, -alpha - 1, -alpha, ply + 1, false, true);
             if (r > 0 && score > alpha) {
-                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true);
             }
             if (score > alpha && score < beta) {
-                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes);
+                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true);
             }
         }
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
+        if (stop_search_flag) { /* No pop needed for C-array */ return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -838,14 +787,14 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         }
                         history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
-                    current_search_path_hashes.pop_back();
+                    /* No pop needed for C-array */
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta;
                 }
             }
         }
     }
-    current_search_path_hashes.pop_back();
+    /* No pop needed for C-array */
 
     if (legal_moves_played == 0) {
         return in_check ? (-MATE_SCORE + ply) : 0;
@@ -860,22 +809,43 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 Position uci_root_pos;
 Move uci_best_move_overall;
 
-void parse_fen(Position& pos, const std::string& fen_str) {
-    pos = Position();
-    std::stringstream ss(fen_str);
-    std::string part;
+// Helper to skip whitespace
+const char* skip_whitespace(const char* str) {
+    while (*str && isspace((unsigned char)*str)) {
+        str++;
+    }
+    return str;
+}
 
-    ss >> part;
+// Helper to get next token
+const char* get_token(const char* str, char* buffer, size_t buffer_len) {
+    str = skip_whitespace(str);
+    size_t i = 0;
+    while (*str && !isspace((unsigned char)*str) && i < buffer_len - 1) {
+        buffer[i++] = *str++;
+    }
+    buffer[i] = '\0';
+    return str;
+}
+
+
+void parse_fen(Position& pos, const char* fen_str_c) {
+    pos = Position(); // Reset
+    char part[256];
+    const char* p = fen_str_c;
+
+    p = get_token(p, part, sizeof(part));
     int rank = 7, file = 0;
-    for (char c : part) {
-        if (std::isdigit(c)) {
+    for (int i = 0; part[i]; ++i) {
+        char c = part[i];
+        if (isdigit(c)) {
             file += (c - '0');
         } else if (c == '/') {
             rank--; file = 0;
         } else {
             Piece p_type = NO_PIECE; Color p_color = NO_COLOR;
-            if (std::islower(c)) p_color = BLACK; else p_color = WHITE;
-            char lower_c = std::tolower(c);
+            if (islower(c)) p_color = BLACK; else p_color = WHITE;
+            char lower_c = tolower(c);
             if (lower_c == 'p') p_type = PAWN; else if (lower_c == 'n') p_type = KNIGHT;
             else if (lower_c == 'b') p_type = BISHOP; else if (lower_c == 'r') p_type = ROOK;
             else if (lower_c == 'q') p_type = QUEEN; else if (lower_c == 'k') p_type = KING;
@@ -891,18 +861,19 @@ void parse_fen(Position& pos, const std::string& fen_str) {
         }
     }
 
-    ss >> part; pos.side_to_move = (part == "w") ? WHITE : BLACK;
+    p = get_token(p, part, sizeof(part)); pos.side_to_move = (part[0] == 'w') ? WHITE : BLACK;
 
-    ss >> part;
+    p = get_token(p, part, sizeof(part));
     pos.castling_rights = 0;
-    for (char c : part) {
+    for (int i=0; part[i]; ++i) {
+        char c = part[i];
         if (c == 'K') pos.castling_rights |= 1; else if (c == 'Q') pos.castling_rights |= 2;
         else if (c == 'k') pos.castling_rights |= 4; else if (c == 'q') pos.castling_rights |= 8;
     }
 
-    ss >> part;
-    if (part != "-") {
-        if (part.length() == 2 && part[0] >= 'a' && part[0] <= 'h' && part[1] >= '1' && part[1] <= '8') {
+    p = get_token(p, part, sizeof(part));
+    if (part[0] != '-') {
+        if (strlen(part) == 2 && part[0] >= 'a' && part[0] <= 'h' && part[1] >= '1' && part[1] <= '8') {
             int ep_file = part[0] - 'a';
             int ep_rank = part[1] - '1';
             pos.ep_square = ep_rank * 8 + ep_file;
@@ -913,24 +884,26 @@ void parse_fen(Position& pos, const std::string& fen_str) {
         pos.ep_square = -1;
     }
 
-    if (ss >> part) { try {pos.halfmove_clock = std::stoi(part);} catch(...) {pos.halfmove_clock = 0;} } else pos.halfmove_clock = 0;
-    if (ss >> part) { try {pos.fullmove_number = std::stoi(part);} catch(...){pos.fullmove_number = 1;} } else pos.fullmove_number = 1;
+    p = get_token(p, part, sizeof(part)); if (part[0]) pos.halfmove_clock = atoi(part); else pos.halfmove_clock = 0;
+    p = get_token(p, part, sizeof(part)); if (part[0]) pos.fullmove_number = atoi(part); else pos.fullmove_number = 1;
+    if (pos.fullmove_number < 1) pos.fullmove_number = 1;
+
 
     pos.ply = 0;
     pos.zobrist_hash = calculate_zobrist_hash(pos);
-    game_history_hashes.clear();
+    game_history_count = 0; // Reset history
 }
 
-Move parse_uci_move_from_string(const Position& current_pos, const std::string& uci_move_str) {
+Move parse_uci_move_from_string(const Position& current_pos, const char* uci_move_str) {
     Move m = NULL_MOVE;
-    if (uci_move_str.length() < 4) return m;
+    if (strlen(uci_move_str) < 4) return m;
 
     m.from = (uci_move_str[0] - 'a') + (uci_move_str[1] - '1') * 8;
     m.to = (uci_move_str[2] - 'a') + (uci_move_str[3] - '1') * 8;
 
     if (m.from < 0 || m.from > 63 || m.to < 0 || m.to > 63) return NULL_MOVE;
 
-    if (uci_move_str.length() == 5) {
+    if (strlen(uci_move_str) == 5) {
         char promo_char = uci_move_str[4];
         if (promo_char == 'q') m.promotion = QUEEN;
         else if (promo_char == 'n') m.promotion = KNIGHT;
@@ -943,12 +916,11 @@ Move parse_uci_move_from_string(const Position& current_pos, const std::string& 
 uint64_t calculate_zobrist_hash(const Position& pos) {
     uint64_t h = 0;
     for (int c = 0; c < 2; ++c) {
-        for (int p = PAWN; p <= KING; ++p) {
-            uint64_t b = pos.piece_bb[p] & pos.color_bb[c];
+        for (int p_idx = PAWN; p_idx <= KING; ++p_idx) {
+            uint64_t b = pos.piece_bb[p_idx] & pos.color_bb[c];
             while (b) {
-                int sq = lsb_index(b);
-                b &= b - 1;
-                h ^= zobrist_pieces[c][p][sq];
+                int sq = lsb_index(b); b &= b - 1;
+                h ^= zobrist_pieces[c][p_idx][sq];
             }
         }
     }
@@ -959,177 +931,179 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
 }
 
 void uci_loop() {
-    std::string line, token;
+    char line_buffer[1024];
+    char token[256];
+    char uci_move_buffer[10]; // For move_to_uci
+
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    // g_configured_tt_size_mb is already TT_SIZE_MB_DEFAULT globally
 
-    while (std::getline(std::cin, line)) {
-        std::istringstream ss(line);
-        ss >> token;
+    while (fgets(line_buffer, sizeof(line_buffer), stdin) != NULL) {
+        const char* p_line = line_buffer;
+        p_line = get_token(p_line, token, sizeof(token));
 
-        if (token == "uci") {
-            std::cout << "id name Amira\n";
-            std::cout << "id author ChessTubeTree\n";
-            std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
-            std::cout << "uciok\n" << std::flush; // Ensure uciok is sent out immediately
-        } else if (token == "isready") {
-            if (!g_tt_is_initialized) {
-                init_tt(g_configured_tt_size_mb); // Uses current g_configured_tt_size_mb (default or from setoption)
+        if (strcmp(token, "uci") == 0) {
+            printf("id name AmiraC\n"); // AmiraC for C-style
+            printf("id author ChessTubeTree\n");
+            printf("option name Hash type spin default %d min 0 max 1024\n", TT_SIZE_MB_DEFAULT);
+            printf("uciok\n"); fflush(stdout);
+        } else if (strcmp(token, "isready") == 0) {
+            if (!g_tt_is_initialized && TT_MAX_ENTRIES > 0) { // Only init if TT is enabled
+                init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
-            std::cout << "readyok\n" << std::flush; // Ensure readyok is sent out immediately
-        } else if (token == "setoption") {
-            std::string name_token, value_token, name_str, value_str_val;
-            ss >> name_token;
-            if (name_token == "name") {
-                ss >> name_str >> value_token >> value_str_val; // Expect "name <option_name> value <option_value>"
-                if (name_str == "Hash") {
-                    try {
-                        int parsed_size = std::stoi(value_str_val);
-                        g_configured_tt_size_mb = parsed_size; // Update configured size
-                    } catch (...) {
-                        // If parsing fails, g_configured_tt_size_mb remains what it was.
-                        // We will initialize with this value in init_tt below.
-                    }
-                    // (Re)Initialize TT with the (newly) configured or last known valid size.
+            printf("readyok\n"); fflush(stdout);
+        } else if (strcmp(token, "setoption") == 0) {
+            char name_token_buf[64], value_token_buf[64], name_str_buf[64], value_str_val_buf[64];
+            p_line = get_token(p_line, name_token_buf, sizeof(name_token_buf)); // "name"
+            if (strcmp(name_token_buf, "name") == 0) {
+                p_line = get_token(p_line, name_str_buf, sizeof(name_str_buf)); // Option name e.g. "Hash"
+                p_line = get_token(p_line, value_token_buf, sizeof(value_token_buf)); // "value"
+                p_line = get_token(p_line, value_str_val_buf, sizeof(value_str_val_buf)); // Option value
+
+                if (strcmp(name_str_buf, "Hash") == 0 && TT_MAX_ENTRIES > 0) {
+                    int parsed_size = atoi(value_str_val_buf);
+                    g_configured_tt_size_mb = parsed_size;
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
                 }
             }
-        } else if (token == "ucinewgame") {
+        } else if (strcmp(token, "ucinewgame") == 0) {
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-            // (Re)Initialize TT to the currently configured size (or default if never changed)
-            init_tt(g_configured_tt_size_mb);
-            g_tt_is_initialized = true;
+            if (TT_MAX_ENTRIES > 0) {
+                init_tt(g_configured_tt_size_mb);
+                g_tt_is_initialized = true;
+            }
             reset_killers_and_history();
-            game_history_hashes.clear();
-        } else if (token == "position") {
-            std::string fen_str_collector;
-            ss >> token; // "fen" or "startpos"
-            if (token == "startpos") {
+            game_history_count = 0;
+        } else if (strcmp(token, "position") == 0) {
+            char fen_str_collector[512] = "";
+            bool fen_mode = false;
+            p_line = get_token(p_line, token, sizeof(token)); 
+            
+            if (strcmp(token, "startpos") == 0) {
                 parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-                if (ss.rdbuf()->in_avail() > 0) {
-                    std::string next_word; std::streampos p = ss.tellg(); ss >> next_word;
-                    if (next_word == "moves") token = "moves"; else {ss.seekg(p); token = "";}
-                } else token = "";
-            } else if (token == "fen") {
-                std::string temp_fen_part;
-                for (int i = 0; i < 6; ++i) { 
-                    if (!(ss >> temp_fen_part)) break;
-                    if (temp_fen_part == "moves") { token = "moves"; break; }
-                    fen_str_collector += temp_fen_part + " ";
+                p_line = get_token(p_line, token, sizeof(token)); // Check for "moves"
+            } else if (strcmp(token, "fen") == 0) {
+                fen_mode = true;
+                // Collect FEN parts
+                char temp_fen_part[128];
+                int fen_parts_count = 0;
+                while(fen_parts_count < 6) {
+                    const char* next_p = get_token(p_line, temp_fen_part, sizeof(temp_fen_part));
+                    if (temp_fen_part[0] == '\0' || strcmp(temp_fen_part, "moves") == 0) {
+                        if(strcmp(temp_fen_part, "moves") == 0) strcpy(token, "moves"); else token[0] = '\0';
+                        p_line = next_p; // Consume "moves" if present
+                        break;
+                    }
+                    strcat(fen_str_collector, temp_fen_part);
+                    strcat(fen_str_collector, " ");
+                    p_line = next_p;
+                    fen_parts_count++;
                 }
-                if (token != "moves") { 
-                   if (!fen_str_collector.empty()) fen_str_collector.pop_back(); 
-                   parse_fen(uci_root_pos, fen_str_collector);
-                   if (ss.rdbuf()->in_avail() > 0) {
-                        std::string next_word; std::streampos p = ss.tellg(); ss >> next_word;
-                        if (next_word == "moves") token = "moves"; else {ss.seekg(p); token = "";}
-                   } else token = "";
-                } else { 
-                    if (!fen_str_collector.empty()) fen_str_collector.pop_back();
-                    parse_fen(uci_root_pos, fen_str_collector); 
-                }
+                if (strlen(fen_str_collector) > 0) fen_str_collector[strlen(fen_str_collector)-1] = '\0'; // Remove trailing space
+                parse_fen(uci_root_pos, fen_str_collector);
+            }
+            
+            if (game_history_count < MAX_GAME_HISTORY_PLY) {
+                 game_history_hashes[game_history_count++] = uci_root_pos.zobrist_hash;
             }
 
-            game_history_hashes.push_back(uci_root_pos.zobrist_hash);
 
-            if (token == "moves") {
-                std::string move_str_uci;
-                while (ss >> move_str_uci) {
+            if (strcmp(token, "moves") == 0) {
+                char move_str_uci[10];
+                while(true){
+                    p_line = get_token(p_line, move_str_uci, sizeof(move_str_uci));
+                    if(move_str_uci[0] == '\0') break;
+
                     Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
-                    if (m.is_null()) break;
+                    if (m.is_null() && strcmp(move_str_uci,"0000") != 0) break; // Invalid move string
+                    if (m.is_null() && strcmp(move_str_uci,"0000") == 0 && strlen(move_str_uci) > 0) { /* handle null move if needed */ }
+                     else if (m.is_null() && strlen(move_str_uci) == 0) break; // No more moves
+
                     bool legal;
                     uci_root_pos = make_move(uci_root_pos, m, legal);
                     if (!legal) break;
-                    game_history_hashes.push_back(uci_root_pos.zobrist_hash);
+                    if (game_history_count < MAX_GAME_HISTORY_PLY) {
+                         game_history_hashes[game_history_count++] = uci_root_pos.zobrist_hash;
+                    }
                 }
             }
-        } else if (token == "go") {
-            // Ensure TT is initialized before search, if somehow not done yet (e.g. GUI skips isready)
-            if (!g_tt_is_initialized) {
+        } else if (strcmp(token, "go") == 0) {
+            if (!g_tt_is_initialized && TT_MAX_ENTRIES > 0) {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
 
             int wtime = -1, btime = -1, winc = 0, binc = 0, movestogo = 0;
             long long fixed_time_per_move = -1;
+            char go_param[64];
 
-            std::string go_param;
-            while(ss >> go_param) {
-                if (go_param == "wtime") ss >> wtime;
-                else if (go_param == "btime") ss >> btime;
-                else if (go_param == "winc") ss >> winc;
-                else if (go_param == "binc") ss >> binc;
-                else if (go_param == "movestogo") ss >> movestogo;
-                else if (go_param == "movetime") ss >> fixed_time_per_move;
+            while(true){
+                p_line = get_token(p_line, go_param, sizeof(go_param));
+                if(go_param[0] == '\0') break;
+
+                if (strcmp(go_param, "wtime")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); wtime = atoi(go_param); }
+                else if (strcmp(go_param, "btime")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); btime = atoi(go_param); }
+                else if (strcmp(go_param, "winc")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); winc = atoi(go_param); }
+                else if (strcmp(go_param, "binc")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); binc = atoi(go_param); }
+                else if (strcmp(go_param, "movestogo")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); movestogo = atoi(go_param); }
+                else if (strcmp(go_param, "movetime")==0) { p_line = get_token(p_line, go_param, sizeof(go_param)); fixed_time_per_move = atoll(go_param); } // Use atoll for long long
             }
-
+            
             if (fixed_time_per_move != -1) {
-                search_budget_ms = fixed_time_per_move - 50;
+                search_budget_ms = fixed_time_per_move - 50; // Small buffer
             } else {
                 int my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
                 int my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
-
                 if (my_time != -1) {
                     long long base_time_slice;
-                    if (movestogo > 0 && movestogo < 40) {
-                        base_time_slice = my_time / movestogo;
-                    } else {
-                        base_time_slice = my_time / 25;
-                    }
+                    if (movestogo > 0 && movestogo < 40) base_time_slice = my_time / movestogo;
+                    else base_time_slice = my_time / 25;
                     search_budget_ms = base_time_slice + my_inc - 50;
                     if (search_budget_ms > my_time * 0.8 && my_time > 100) search_budget_ms = (long long)(my_time * 0.8);
-                } else {
-                    search_budget_ms = 2000;
-                }
+                } else { search_budget_ms = 2000; } // Default time
             }
             if (search_budget_ms <= 0) search_budget_ms = 50;
 
-            search_start_timepoint = std::chrono::steady_clock::now();
+            search_start_clock_time = clock();
             reset_search_state();
-
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
-            std::vector<uint64_t> root_path_hashes;
-
+            
             for (int depth = 1; depth <= MAX_PLY; ++depth) {
-                int current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, root_path_hashes);
-
-                if (stop_search_flag && depth > 1) {
-                    break;
-                }
+                int current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
+                if (stop_search_flag && depth > 1) break;
 
                 Move tt_root_move = NULL_MOVE; int tt_root_score;
-                int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
-                if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
-                     if (!tt_root_move.is_null()) {
-                        uci_best_move_overall = tt_root_move;
-                     }
-                     best_score_overall = current_score;
+                int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE; // prevent modification by probe
+                if (TT_MAX_ENTRIES > 0 && probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
+                     if (!tt_root_move.is_null()) uci_best_move_overall = tt_root_move;
+                     best_score_overall = current_score; // Use score from search, not TT for root
                 } else {
                      best_score_overall = current_score;
-                     TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
-                     if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
-                         uci_best_move_overall = root_entry_check.best_move;
+                     if (TT_MAX_ENTRIES > 0 && tt_mask > 0) { // Only access TT if it's valid
+                        TTEntry& root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
+                        if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
+                             uci_best_move_overall = root_entry_check.best_move;
+                        }
                      }
                 }
 
-
-                auto now_tp = std::chrono::steady_clock::now();
-                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
+                clock_t now_clock = clock();
+                long long elapsed_ms = (now_clock - search_start_clock_time) * 1000LL / CLOCKS_PER_SEC;
                 if (elapsed_ms < 0) elapsed_ms = 0;
 
-                std::cout << "info depth " << depth << " score cp " << best_score_overall;
-                if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
-                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall)/2;
-                std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
-                if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
+                printf("info depth %d score cp %d", depth, best_score_overall);
+                if (best_score_overall > MATE_THRESHOLD) printf(" mate %d", (MATE_SCORE - best_score_overall + 1)/2);
+                else if (best_score_overall < -MATE_THRESHOLD) printf(" mate %d", -(MATE_SCORE + best_score_overall)/2);
+                printf(" nodes %llu time %lld", nodes_searched, elapsed_ms);
+                if (elapsed_ms > 0 && nodes_searched > 0) printf(" nps %llu", (nodes_searched * 1000 / elapsed_ms));
 
                 if (!uci_best_move_overall.is_null()) {
-                     std::cout << " pv " << move_to_uci(uci_best_move_overall);
+                     move_to_uci(uci_best_move_overall, uci_move_buffer);
+                     printf(" pv %s", uci_move_buffer);
                 }
-                std::cout << std::endl; // std::endl flushes
+                printf("\n"); fflush(stdout);
 
                 if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
                 if (search_budget_ms > 0 && elapsed_ms > 0 && depth > 1) {
@@ -1139,41 +1113,49 @@ void uci_loop() {
             }
 
             if (!uci_best_move_overall.is_null()) {
-                 std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
+                 move_to_uci(uci_best_move_overall, uci_move_buffer);
+                 printf("bestmove %s\n", uci_move_buffer);
             } else {
-                std::vector<Move> legal_moves_fallback;
-                generate_moves(uci_root_pos, legal_moves_fallback);
+                Move legal_moves_fallback[MAX_MOVES_PER_PLY];
+                int num_legal_fallback = generate_moves(uci_root_pos, legal_moves_fallback);
                 bool found_one_legal_fallback = false;
-                for(const auto& m_fall : legal_moves_fallback) {
+                for(int i=0; i < num_legal_fallback; ++i) {
+                    const Move& m_fall = legal_moves_fallback[i];
                     bool is_leg_fall;
-                    Position temp_pos = make_move(uci_root_pos, m_fall, is_leg_fall);
+                    Position temp_pos = make_move(uci_root_pos, m_fall, is_leg_fall); // Check legality
                     if(is_leg_fall) {
-                        std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
+                        move_to_uci(m_fall, uci_move_buffer);
+                        printf("bestmove %s\n", uci_move_buffer);
                         found_one_legal_fallback = true;
                         break;
                     }
                 }
-                if (!found_one_legal_fallback && !legal_moves_fallback.empty()){
-                     std::cout << "bestmove " << move_to_uci(legal_moves_fallback[0]) << std::endl;
-                } else if (!found_one_legal_fallback && legal_moves_fallback.empty()){
-                     std::cout << "bestmove 0000\n" << std::flush;
+                if (!found_one_legal_fallback && num_legal_fallback > 0){
+                     move_to_uci(legal_moves_fallback[0], uci_move_buffer); // Send first pseudolegal if none legal (should not happen ideally)
+                     printf("bestmove %s\n", uci_move_buffer);
+                } else if (!found_one_legal_fallback && num_legal_fallback == 0){
+                     printf("bestmove 0000\n");
                 }
             }
+            fflush(stdout);
 
-        } else if (token == "quit" || token == "stop") {
+        } else if (strcmp(token, "quit") == 0 || strcmp(token, "stop") == 0) {
             stop_search_flag = true;
-            if (token == "quit") break;
+            if (strcmp(token, "quit") == 0) break;
         }
     }
 }
 
 int main(int argc, char* argv[]) {
-    std::ios_base::sync_with_stdio(false);
-    std::cin.tie(NULL);
+    // std::ios_base::sync_with_stdio(false); // Not needed with printf/fgets
+    // std::cin.tie(NULL);                   // Not needed with printf/fgets
 
     init_zobrist();
     init_attack_tables();
-    // init_tt(g_configured_tt_size_mb); // TT initialization is now deferred
+    if (TT_MAX_ENTRIES > 0) { // Only initialize if TT is conceptually enabled
+        init_tt(g_configured_tt_size_mb);
+        g_tt_is_initialized = true;
+    }
     reset_killers_and_history();
 
     uci_loop();
