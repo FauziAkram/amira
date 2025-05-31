@@ -1,3 +1,4 @@
+![APRECI~1](https://github.com/user-attachments/assets/1216b195-2f3a-4b05-aa7c-e27297a8d0aa)
 # Amira Chess Engine
 
 **Author:** ChessTubeTree (Fauzi)
