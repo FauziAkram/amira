@@ -18,7 +18,7 @@
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
-constexpr int MAX_PLY = 64;
+constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 8;
 
 constexpr int MATE_SCORE = 30000;
