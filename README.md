@@ -2,7 +2,7 @@
 # Amira Chess Engine
 
 **Author:** ChessTubeTree (Fauzi)
-**Version:** 1.0 (Single-file Edition)
+**Version:** 0.22
 
 ## Description
 
