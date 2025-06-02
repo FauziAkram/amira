@@ -1049,8 +1049,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
-        current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
         if (!legal) continue;
+        current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
 
         legal_moves_played++;
         int score;
