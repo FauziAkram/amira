@@ -1045,12 +1045,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
-
     for (int i = 0; i < (int)moves.size(); ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
+        current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
         if (!legal) continue;
 
         legal_moves_played++;
@@ -1086,7 +1085,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
+        current_search_path_hashes.pop_back(); // Backtrack from current position
+        
+        if (stop_search_flag) { return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -1111,7 +1112,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
     }
-    current_search_path_hashes.pop_back(); // Backtrack from current position
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
