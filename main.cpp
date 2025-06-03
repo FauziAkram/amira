@@ -989,7 +989,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     }
     // Check against game history for 3-fold repetition
     int game_reps = 0;
-    for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
+    for(uint64_t hist_hash : game_history_hashes) if (hist_hash == pos.zobrist_hash) game_reps++;
     if(game_reps >= 2 && ply > 0) return 0; // Draw by 3-fold repetition in game
 
     // 50-move rule
@@ -1025,7 +1025,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1; // Increment ply
 
             int R_nmp = (depth > 6) ? 3 : 2; // Adaptive reduction for NMP
-            current_search_path_hashes.push_back(pos.zobrist_hash); // Add current pos for child's rep check
+            current_search_path_hashes.push_back(null_next_pos.zobrist_hash); // Add current pos for child's rep check
             int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, current_search_path_hashes);
             current_search_path_hashes.pop_back(); // Backtrack
 
@@ -1045,13 +1045,12 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
-
     for (int i = 0; i < (int)moves.size(); ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
+        current_search_path_hashes.push_back(next_pos.zobrist_hash); // Add current position to path for children
 
         legal_moves_played++;
         int score;
@@ -1086,7 +1085,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
+        current_search_path_hashes.pop_back(); // Backtrack
+
+        if (stop_search_flag) { return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -1104,14 +1105,13 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
                             history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
-                    current_search_path_hashes.pop_back(); // Backtrack
+
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta; // Fail-high
                 }
             }
         }
     }
-    current_search_path_hashes.pop_back(); // Backtrack from current position
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
@@ -1316,14 +1316,8 @@ void uci_loop() {
                 parse_fen(uci_root_pos, fen_str_collector);
             }
 
-            // Add initial position to game history (after fen/startpos, before moves)
-            // Important for 3-fold repetition detection from the very first move
-            if(game_history_hashes.empty() || game_history_hashes.back() != uci_root_pos.zobrist_hash) {
-                 game_history_hashes.push_back(uci_root_pos.zobrist_hash);
-            }
-
-
             if (token == "moves") {
+                game_history_hashes.clear();
                 std::string move_str_uci;
                 while (ss >> move_str_uci) {
                     Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
@@ -1331,11 +1325,11 @@ void uci_loop() {
                     if (m.is_null() && move_str_uci == "0000") { /* UCI nullmove, usually indicates error or end */ break; }
 
                     bool legal;
+                    game_history_hashes.push_back(uci_root_pos.zobrist_hash);
                     uci_root_pos = make_move(uci_root_pos, m, legal);
                     if (!legal) { /* Illegal move received from GUI */ break; }
-                    // Add hash of position *after* move to game history
-                    game_history_hashes.push_back(uci_root_pos.zobrist_hash);
                 }
+                game_history_hashes.push_back(uci_root_pos.zobrist_hash);
             }
         } else if (token == "go") {
             if (!g_tt_is_initialized) { // Failsafe
