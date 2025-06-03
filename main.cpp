@@ -990,10 +990,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     // Check against game history for 3-fold repetition
     int game_reps = 0;
     for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
-    if(game_reps >= 2 && ply > 0) return 0; // Draw by 3-fold repetition in game
+    // MODIFIED LINE: Removed "&& ply > 0"
+    if(game_reps >= 2) return 0; // Draw by 3-fold repetition in game 
 
     // 50-move rule
-    if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
+    if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw (ply > 0 is fine here, 50 moves must have passed)
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     // Check extension
@@ -1045,49 +1046,46 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
+
     for (int i = 0; i < (int)moves.size(); ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
         
-        current_search_path_hashes.push_back(pos.zobrist_hash);
+        current_search_path_hashes.push_back(pos.zobrist_hash); 
 
         legal_moves_played++;
         int score;
 
         // Principal Variation Search (PVS)
-        if (legal_moves_played == 1) { // First move is searched with full window
+        if (legal_moves_played == 1) { 
             score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_search_path_hashes);
-        } else { // Subsequent moves: LMR then PVS re-search if necessary
-            // Late Move Reduction (LMR)
+        } else { 
             int R_lmr = 0;
-            if (depth >= 3 && i >= (is_pv_node ? 3 : 2) && // Conditions for LMR
+            if (depth >= 3 && i >= (is_pv_node ? 3 : 2) && 
                 !in_check && current_move.promotion == NO_PIECE &&
-                pos.piece_on_sq(current_move.to) == NO_PIECE && // Not a capture
-                current_move.score < 700000) { // Not a killer or TT move or high history score
+                pos.piece_on_sq(current_move.to) == NO_PIECE && 
+                current_move.score < 700000) { 
 
-                R_lmr = 1; // Base reduction
-                if (depth >= 5 && i >= (is_pv_node ? 5 : 4)) R_lmr = (depth > 7 ? 2 : 1); // Deeper reduction for later moves/deeper searches
-                R_lmr = std::min(R_lmr, depth - 2); // Don't reduce too much
+                R_lmr = 1; 
+                if (depth >= 5 && i >= (is_pv_node ? 5 : 4)) R_lmr = (depth > 7 ? 2 : 1); 
+                R_lmr = std::min(R_lmr, depth - 2); 
                 if (R_lmr < 0) R_lmr = 0;
             }
 
-            // Search with reduced depth and null window
             score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
 
-            // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth
             if (R_lmr > 0 && score > alpha) {
-                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with possibly still reduced window
             }
-            // If PVS null window search still failed high, re-search with full window
-            if (score > alpha && score < beta) { // Only if it's a PV node candidate
-                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
+            if (score > alpha && score < beta) { 
+                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); 
             }
         }
         
-        current_search_path_hashes.pop_back();
-        if (stop_search_flag) { return 0; }
+        current_search_path_hashes.pop_back(); 
+        if (stop_search_flag) { return 0; } 
 
 
         if (score > best_score) {
@@ -1095,30 +1093,26 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             best_move_found = current_move;
             if (score > alpha) {
                 alpha = score;
-                if (score >= beta) { // Beta cutoff
-                    // Store killer move and update history heuristic for non-captures causing cutoff
+                if (score >= beta) { 
                     if (ply < MAX_PLY && pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
                         if (!(current_move == killer_moves[ply][0])) {
                             killer_moves[ply][1] = killer_moves[ply][0];
                             killer_moves[ply][0] = current_move;
                         }
-                        // Increase history score for this move
-                        if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
+                        if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) 
                             history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
-                    return beta; // Fail-high
+                    return beta; 
                 }
             }
         }
     }
 
-    // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
-        return in_check ? (-MATE_SCORE + ply) : 0; // Checkmate or stalemate
+        return in_check ? (-MATE_SCORE + ply) : 0; 
     }
 
-    // Store result in TT
     TTBound final_bound_type = (best_score > original_alpha) ? TT_EXACT : TT_UPPER;
     store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
     return best_score;
