@@ -990,7 +990,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     // Check against game history for 3-fold repetition
     int game_reps = 0;
     for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
-    // MODIFIED LINE: Removed "&& ply > 0"
     if(game_reps >= 2) return 0; // Draw by 3-fold repetition in game 
 
     // 50-move rule
