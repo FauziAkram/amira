@@ -1045,13 +1045,15 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
+    // current_search_path_hashes.push_back(pos.zobrist_hash); // Old: Line 1048, removed by diff
 
     for (int i = 0; i < (int)moves.size(); ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
+        
+        current_search_path_hashes.push_back(pos.zobrist_hash); // Added by diff (Line 1053 in original numbering)
 
         legal_moves_played++;
         int score;
@@ -1085,8 +1087,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                  score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
             }
         }
+        
+        current_search_path_hashes.pop_back(); // Added by diff (Line 1088 in original numbering)
+        if (stop_search_flag) { return 0; } // Added by diff (Line 1090 in original numbering, Line 1089 was removed)
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -1104,14 +1108,14 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
                             history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
-                    current_search_path_hashes.pop_back(); // Backtrack
+                    // current_search_path_hashes.pop_back(); // Not needed here with localized push/pop
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta; // Fail-high
                 }
             }
         }
     }
-    current_search_path_hashes.pop_back(); // Backtrack from current position
+    // current_search_path_hashes.pop_back(); // Old: Line 1114, removed by diff
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
