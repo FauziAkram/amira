@@ -874,6 +874,7 @@ uint64_t nodes_searched = 0;
 Move killer_moves[MAX_PLY][2];
 int history_heuristic[2][64][64];
 std::vector<uint64_t> game_history_hashes; // Stores hashes of positions played in the game for 3-fold repetition
+uint64_t search_history_stack[MAX_PLY]; // Stores hashes for the current search path
 
 void reset_search_state() {
     nodes_searched = 0;
@@ -978,22 +979,35 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 }
 
 
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, std::vector<uint64_t>& current_search_path_hashes) {
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
     nodes_searched++;
     if (check_time()) return 0; // Search budget exceeded
     if (ply >= MAX_PLY -1) return evaluate(pos); // Max ply reached
 
-    // Repetition detection within the current search path
-    for (uint64_t path_hash : current_search_path_hashes) {
-        if (path_hash == pos.zobrist_hash) return 0; // Draw by repetition in current path
+    // --- Efficient Repetition and 50-Move Rule Check ---
+    if (ply > 0) {
+        // 50-move rule draw
+        if (pos.halfmove_clock >= 100) return 0;
+
+        // Repetition check. We only need to check positions since the last irreversible move.
+        // The halfmove_clock tells us how many plies ago that was.
+        // We check previous positions of the same side to move (i.e., step back by 2 plies).
+        int root_of_reversible_path = ply - pos.halfmove_clock;
+        for (int i = ply - 2; i >= root_of_reversible_path; i -= 2) {
+            if (search_history_stack[i] == pos.zobrist_hash) {
+                return 0; // Draw by repetition in the current search path
+            }
+        }
     }
-    // Check against game history for 3-fold repetition
+    
+    // Check for 3-fold repetition against the game history. This is less frequent.
     int game_reps = 0;
     for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
-    if(game_reps >= 2 && ply > 0) return 0; // Draw by 3-fold repetition in game
+    if(game_reps >= 2) return 0;
 
-    // 50-move rule
-    if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
+    // Store current hash in our history stack for children nodes to check against.
+    search_history_stack[ply] = pos.zobrist_hash;
+
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     // Check extension
@@ -1025,9 +1039,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1; // Increment ply
 
             int R_nmp = (depth > 6) ? 3 : 2; // Adaptive reduction for NMP
-            current_search_path_hashes.push_back(pos.zobrist_hash); // Add current pos for child's rep check
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, current_search_path_hashes);
-            current_search_path_hashes.pop_back(); // Backtrack
+            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false);
 
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -1045,8 +1057,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
-
     for (int i = 0; i < (int)moves.size(); ++i) {
         const Move& current_move = moves[i];
         bool legal;
@@ -1058,7 +1068,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Principal Variation Search (PVS)
         if (legal_moves_played == 1) { // First move is searched with full window
-            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_search_path_hashes);
+            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true);
         } else { // Subsequent moves: LMR then PVS re-search if necessary
             // Late Move Reduction (LMR)
             int R_lmr = 0;
@@ -1074,19 +1084,19 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
 
             // Search with reduced depth and null window
-            score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+            score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true);
 
             // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth
             if (R_lmr > 0 && score > alpha) {
-                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true);
             }
             // If PVS null window search still failed high, re-search with full window
             if (score > alpha && score < beta) { // Only if it's a PV node candidate
-                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
+                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true); // Re-search with full window
             }
         }
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
+        if (stop_search_flag) { return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -1104,14 +1114,12 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
                             history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
-                    current_search_path_hashes.pop_back(); // Backtrack
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta; // Fail-high
                 }
             }
         }
     }
-    current_search_path_hashes.pop_back(); // Backtrack from current position
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
@@ -1387,7 +1395,6 @@ void uci_loop() {
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
-            std::vector<uint64_t> root_path_hashes; // Empty for root call
 
             // Aspiration Windows
             int aspiration_alpha = -INF_SCORE;
@@ -1397,15 +1404,15 @@ void uci_loop() {
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
                 if (depth <= 1) { // No aspiration for very shallow depths
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, root_path_hashes);
+                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
                 } else {
                     // Search with aspiration window
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, root_path_hashes);
+                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     // If search failed high or low, re-search with wider/full window
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                         aspiration_alpha = -INF_SCORE; // Reset for full search
                         aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, root_path_hashes);
+                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     }
                 }
 
