@@ -792,6 +792,11 @@ uint64_t tt_mask = 0;
 bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
+// --- Configurable Time Management Options ---
+int g_time_usage_divisor = 25;
+int g_increment_usage_percent = 80;
+int g_max_time_usage_percent = 80;
+
 void init_tt(size_t mb_size) {
     if (mb_size == 0) {
         transposition_table.clear(); tt_mask = 0; return;
@@ -1254,6 +1259,9 @@ void uci_loop() {
             std::cout << "id name Amira 0.2\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
+            std::cout << "option name TimeUsageDivisor type spin default 25 min 10 max 50\n";
+            std::cout << "option name IncrementUsagePercent type spin default 80 min 0 max 100\n";
+            std::cout << "option name MaxTimeUsagePercent type spin default 80 min 40 max 100\n";
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) { // Initialize TT if not done yet (e.g., if setoption wasn't called)
@@ -1265,18 +1273,24 @@ void uci_loop() {
             std::string name_token, value_token, name_str, value_str_val;
             ss >> name_token; // Should be "name"
             if (name_token == "name") {
-                ss >> name_str; // e.g., "Hash"
+                ss >> name_str; // e.g., "Hash" or "TimeUsageDivisor"
                 ss >> value_token; // Should be "value"
                 ss >> value_str_val; // e.g., "64"
+
                 if (name_str == "Hash") {
                     try {
                         int parsed_size = std::stoi(value_str_val);
-                        g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 1024)); // Clamp value
+                        g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 1024));
                     } catch (...) { /* ignore parse error, keep default */ }
-                    init_tt(g_configured_tt_size_mb); // Re-initialize TT with new size
+                    init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
+                } else if (name_str == "TimeUsageDivisor") {
+                    try { g_time_usage_divisor = std::stoi(value_str_val); } catch(...) {}
+                } else if (name_str == "IncrementUsagePercent") {
+                    try { g_increment_usage_percent = std::stoi(value_str_val); } catch(...) {}
+                } else if (name_str == "MaxTimeUsagePercent") {
+                    try { g_max_time_usage_percent = std::stoi(value_str_val); } catch(...) {}
                 }
-                // Add other options here if needed
             }
         } else if (token == "ucinewgame") {
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -1342,7 +1356,7 @@ void uci_loop() {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
-            
+
             // Check for single legal move case
             std::vector<Move> root_pseudo_moves;
             generate_moves(uci_root_pos, root_pseudo_moves);
@@ -1395,11 +1409,13 @@ void uci_loop() {
                     if (movestogo > 0 && movestogo < 40) { // Use movestogo if available and reasonable
                         base_time_slice = my_time / std::max(1, movestogo);
                     } else {
-                        base_time_slice = my_time / 25; // Default: aim for ~25 moves
+                        base_time_slice = my_time / std::max(1, g_time_usage_divisor);
                     }
-                    search_budget_ms = base_time_slice + my_inc - 50; // Subtract margin
-                    // Don't use too much time if total time is low or a lot of time if total time is high
-                    if (my_time > 100 && search_budget_ms > my_time * 0.8) search_budget_ms = (long long)(my_time * 0.8);
+                    search_budget_ms = base_time_slice + (long long)(my_inc * (g_increment_usage_percent / 100.0)) - 50;
+                    
+                    if (my_time > 100 && search_budget_ms > my_time * (g_max_time_usage_percent / 100.0)) {
+                        search_budget_ms = (long long)(my_time * (g_max_time_usage_percent / 100.0));
+                    }
                 } else {
                     search_budget_ms = 2000; // Default fixed time if no time controls given (e.g. analysis)
                 }
