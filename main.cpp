@@ -1342,6 +1342,30 @@ void uci_loop() {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
+            
+            // Check for single legal move case
+            std::vector<Move> root_pseudo_moves;
+            generate_moves(uci_root_pos, root_pseudo_moves);
+            std::vector<Move> root_legal_moves;
+            for (const Move& m : root_pseudo_moves) {
+                bool is_legal_flag;
+                make_move(uci_root_pos, m, is_legal_flag); // This call checks legality
+                if (is_legal_flag) {
+                    root_legal_moves.push_back(m);
+                }
+            }
+
+            // If there's only one legal move, play it immediately.
+            if (root_legal_moves.size() == 1) {
+                std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
+                continue; // Skip the rest of the "go" command logic
+            }
+            
+            // If there are no legal moves (checkmate/stalemate), output null move.
+            if (root_legal_moves.empty()) {
+                std::cout << "bestmove 0000" << std::endl;
+                continue; // Skip the rest of the "go" command logic
+            }
 
             int wtime = -1, btime = -1, winc = 0, binc = 0, movestogo = 0;
             long long fixed_time_per_move = -1;
