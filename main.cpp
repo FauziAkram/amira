@@ -1342,7 +1342,7 @@ void uci_loop() {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
-            
+
             // Check for single legal move case
             std::vector<Move> root_pseudo_moves;
             generate_moves(uci_root_pos, root_pseudo_moves);
@@ -1397,7 +1397,7 @@ void uci_loop() {
                     } else {
                         base_time_slice = my_time / 25; // Default: aim for ~25 moves
                     }
-                    search_budget_ms = base_time_slice + my_inc - 50; // Subtract margin
+                    search_budget_ms = base_time_slice + (long long)(my_inc * 0.8) - 50; // Use most of increment, subtract margin
                     // Don't use too much time if total time is low or a lot of time if total time is high
                     if (my_time > 100 && search_budget_ms > my_time * 0.8) search_budget_ms = (long long)(my_time * 0.8);
                 } else {
