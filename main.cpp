@@ -515,6 +515,16 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
 const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
 
+// --- NEW: Evaluation Penalties/Bonuses ---
+const int ISOLATED_PAWN_PENALTY_MG = -10;
+const int ISOLATED_PAWN_PENALTY_EG = -15;
+const int DOUBLED_PAWN_PENALTY_MG = -12;
+const int DOUBLED_PAWN_PENALTY_EG = -20;
+const int ROOK_ON_SEVENTH_BONUS_MG = 35;
+const int ROOK_ON_SEVENTH_BONUS_EG = 50;
+const int ROOK_MOBILITY_BONUS[15] = { -15, -10, -5, 0, 3, 5, 7, 9, 10, 11, 12, 12, 13, 13, 13 }; // Bonus per rook based on number of safe squares
+const int BISHOP_MOBILITY_BONUS[14] = { -15, -10, -5, 0, 3, 5, 7, 8, 9, 10, 10, 11, 11, 11 }; // Bonus per bishop based on number of safe squares
+
 // Piece Square Tables (values are for white, mirrored for black)
 const int pawn_pst[64] = {
      0,  0,  0,  0,  0,  0,  0,  0,   5, 10, 10,-20,-20, 10, 10,  5,
@@ -567,6 +577,7 @@ const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
 // Evaluation helper masks
 uint64_t file_bb_mask[8];
 uint64_t rank_bb_mask[8];
+uint64_t adjacent_files_mask[8]; // NEW
 uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
@@ -580,6 +591,13 @@ void init_eval_masks() {
     for (int r = 0; r < 8; ++r) {
         rank_bb_mask[r] = 0ULL;
         for (int f = 0; f < 8; ++f) rank_bb_mask[r] |= set_bit(r * 8 + f);
+    }
+
+    // --- NEW: Initialize adjacent files mask ---
+    for (int f = 0; f < 8; ++f) {
+        adjacent_files_mask[f] = 0ULL;
+        if (f > 0) adjacent_files_mask[f] |= file_bb_mask[f - 1];
+        if (f < 7) adjacent_files_mask[f] |= file_bb_mask[f + 1];
     }
 
     for (int sq = 0; sq < 64; ++sq) {
@@ -606,6 +624,7 @@ int evaluate(const Position& pos) {
     int mg_score = 0;
     int eg_score = 0;
     int game_phase = 0;
+    uint64_t occupied = pos.get_occupied_bb();
 
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
@@ -613,6 +632,8 @@ int evaluate(const Position& pos) {
 
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
+        uint64_t friendly_pieces = pos.color_bb[current_eval_color];
+        uint64_t enemy_pieces = pos.color_bb[1 - current_eval_color];
 
         // Material and PST
         for (int p = PAWN; p <= KING; ++p) {
@@ -626,7 +647,20 @@ int evaluate(const Position& pos) {
                 mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
                 eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
 
+                // --- NEW EVALUATION FEATURES ---
                 if ((Piece)p == PAWN) {
+                    int f = sq % 8;
+                    // ISOLATED PAWN
+                    if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
+                        mg_score += side_multiplier * ISOLATED_PAWN_PENALTY_MG;
+                        eg_score += side_multiplier * ISOLATED_PAWN_PENALTY_EG;
+                    }
+                    // DOUBLED PAWN
+                    if (pop_count(file_bb_mask[f] & all_friendly_pawns) > 1) {
+                         mg_score += side_multiplier * DOUBLED_PAWN_PENALTY_MG;
+                         eg_score += side_multiplier * DOUBLED_PAWN_PENALTY_EG;
+                    }
+                    // PASSED PAWN (existing code)
                     bool is_passed = false;
                     if (current_eval_color == WHITE) {
                         if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
@@ -639,14 +673,37 @@ int evaluate(const Position& pos) {
                         eg_score += side_multiplier * passed_pawn_bonus_eg[rank_from_own_side];
                     }
                 } else if ((Piece)p == ROOK) {
+                    int r = sq / 8;
                     int f = sq % 8;
+                    // ROOK ON OPEN/SEMI-OPEN FILE (existing code)
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
                         if (!enemy_pawn_on_file) { mg_score += side_multiplier * 20; eg_score += side_multiplier * 15; }
                         else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 5;}
                     }
+                    // ROOK ON 7th RANK
+                    int seventh_rank = (current_eval_color == WHITE) ? 6 : 1;
+                    if (r == seventh_rank) {
+                        mg_score += side_multiplier * ROOK_ON_SEVENTH_BONUS_MG;
+                        eg_score += side_multiplier * ROOK_ON_SEVENTH_BONUS_EG;
+                    }
+                    // ROOK MOBILITY
+                    uint64_t attacks = get_rook_attacks_from_sq(sq, occupied);
+                    attacks &= ~enemy_pieces; // Don't count captures as mobility
+                    int mobility = pop_count(attacks);
+                    mg_score += side_multiplier * ROOK_MOBILITY_BONUS[mobility];
+                    eg_score += side_multiplier * ROOK_MOBILITY_BONUS[mobility];
+
+                } else if ((Piece)p == BISHOP) {
+                     // BISHOP MOBILITY
+                    uint64_t attacks = get_bishop_attacks_from_sq(sq, occupied);
+                    attacks &= ~enemy_pieces; // Don't count captures
+                    int mobility = pop_count(attacks);
+                    mg_score += side_multiplier * BISHOP_MOBILITY_BONUS[mobility];
+                    eg_score += side_multiplier * BISHOP_MOBILITY_BONUS[mobility];
                 }
+                // END NEW EVAL FEATURES
             }
         }
         if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
@@ -1256,7 +1313,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.2\n";
+            std::cout << "id name Amira 0.3\n"; // Version bump
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "option name TimeUsageDivisor type spin default 25 min 10 max 50\n";
