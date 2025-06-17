@@ -601,8 +601,52 @@ void init_eval_masks() {
     }
 }
 
+// Checks for draw by insufficient material.
+bool is_insufficient_material(const Position& pos) {
+    // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
+    if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) {
+        return false;
+    }
+
+    // Count minor pieces for both sides
+    int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
+    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
+    int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
+    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
+
+    int white_minors = white_knights + white_bishops;
+    int black_minors = black_knights + black_bishops;
+
+    // Case: K vs K
+    if (white_minors == 0 && black_minors == 0) return true;
+
+    // Case: K + minor vs K
+    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) {
+        return true;
+    }
+    
+    // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
+    if (white_minors == 1 && black_minors == 1) {
+        return true;
+    }
+
+    // Case: K+N+N vs K (generally treated as a draw)
+    if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
+        (white_minors == 0 && black_minors == 2 && black_knights == 2)) {
+        return true;
+    }
+    
+    // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
+    return false;
+}
+
 
 int evaluate(const Position& pos) {
+    // Check for insufficient material draw at the beginning of evaluation.
+    if (is_insufficient_material(pos)) {
+        return 0; // Draw score
+    }
+
     int mg_score = 0;
     int eg_score = 0;
     int game_phase = 0;
@@ -999,6 +1043,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     // 50-move rule
     if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
+    
+    // Check for insufficient material draw
+    if (ply > 0 && is_insufficient_material(pos)) return 0;
+
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     // Check extension
