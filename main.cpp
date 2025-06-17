@@ -24,6 +24,11 @@ constexpr int TT_SIZE_MB_DEFAULT = 256;
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
+// A small penalty for drawing positions. This encourages the engine to avoid
+// repetitions when it has an advantage. When losing, a draw is still much
+// better than a loss, so it will correctly seek this score.
+constexpr int DRAW_SCORE = -10;
+
 
 // Castling rights masks
 constexpr uint8_t WK_CASTLE_MASK = 1;
@@ -990,15 +995,15 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     // Repetition detection within the current search path
     for (uint64_t path_hash : current_search_path_hashes) {
-        if (path_hash == pos.zobrist_hash) return 0; // Draw by repetition in current path
+        if (path_hash == pos.zobrist_hash) return DRAW_SCORE;
     }
     // Check against game history for 3-fold repetition
     int game_reps = 0;
     for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
-    if(game_reps >= 2 && ply > 0) return 0; // Draw by 3-fold repetition in game
+    if(game_reps >= 2 && ply > 0) return DRAW_SCORE;
 
     // 50-move rule
-    if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
+    if (pos.halfmove_clock >= 100 && ply > 0) return DRAW_SCORE;
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     // Check extension
@@ -1120,7 +1125,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
-        return in_check ? (-MATE_SCORE + ply) : 0; // Checkmate or stalemate
+        return in_check ? (-MATE_SCORE + ply) : DRAW_SCORE; // Checkmate or stalemate
     }
 
     // Store result in TT
