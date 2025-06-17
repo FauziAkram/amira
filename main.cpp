@@ -988,17 +988,28 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (check_time()) return 0; // Search budget exceeded
     if (ply >= MAX_PLY -1) return evaluate(pos); // Max ply reached
 
-    // Repetition detection within the current search path
+    // Repetition detection within the current search path (instant draw)
     for (uint64_t path_hash : current_search_path_hashes) {
-        if (path_hash == pos.zobrist_hash) return 0; // Draw by repetition in current path
+        if (path_hash == pos.zobrist_hash) return 0;
     }
-    // Check against game history for 3-fold repetition
-    int game_reps = 0;
-    for(uint64_t hist_hash : game_history_hashes) if(hist_hash == pos.zobrist_hash) game_reps++;
-    if(game_reps >= 2 && ply > 0) return 0; // Draw by 3-fold repetition in game
 
-    // 50-move rule
-    if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
+    // 50-move rule (instant draw)
+    if (pos.halfmove_clock >= 100 && ply > 0) return 0;
+
+    // Check game history for repetitions.
+    // A 3-fold repetition is an instant draw.
+    // A 2-fold repetition is not a draw, but we flag it to discourage it later.
+    bool is_second_occurrence = false;
+    if (ply > 0) {
+        int game_reps = 0;
+        for(uint64_t hist_hash : game_history_hashes) {
+            if(hist_hash == pos.zobrist_hash) {
+                game_reps++;
+            }
+        }
+        if (game_reps >= 2) return 0; // 3rd occurrence (or more) is a draw
+        if (game_reps == 1) is_second_occurrence = true; // 2nd occurrence
+    }
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     // Check extension
@@ -1121,6 +1132,13 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
         return in_check ? (-MATE_SCORE + ply) : 0; // Checkmate or stalemate
+    }
+
+    // Apply score dampening for the second occurrence of a position to discourage it.
+    // This is done after finding the best move from this position, modifying its score.
+    // We do not apply this to mate scores.
+    if (is_second_occurrence && abs(best_score) < MATE_THRESHOLD) {
+        best_score /= 2;
     }
 
     // Store result in TT
