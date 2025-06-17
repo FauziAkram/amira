@@ -601,7 +601,6 @@ void init_eval_masks() {
     }
 }
 
-// *** ADDED FUNCTION ***
 // Checks for draw by insufficient material.
 bool is_insufficient_material(const Position& pos) {
     // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
@@ -643,7 +642,6 @@ bool is_insufficient_material(const Position& pos) {
 
 
 int evaluate(const Position& pos) {
-    // *** MODIFIED CODE ***
     // Check for insufficient material draw at the beginning of evaluation.
     if (is_insufficient_material(pos)) {
         return 0; // Draw score
