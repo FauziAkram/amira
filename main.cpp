@@ -836,11 +836,6 @@ uint64_t tt_mask = 0;
 bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
-// --- Configurable Time Management Options ---
-int g_time_usage_divisor = 25;
-int g_increment_usage_percent = 80;
-int g_max_time_usage_percent = 80;
-
 void init_tt(size_t mb_size) {
     if (mb_size == 0) {
         transposition_table.clear(); tt_mask = 0; return;
@@ -916,9 +911,13 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
 
 // --- Search ---
 std::chrono::steady_clock::time_point search_start_timepoint;
-long long search_budget_ms = 0;
 bool stop_search_flag = false;
 uint64_t nodes_searched = 0;
+
+// Time management globals
+std::chrono::steady_clock::time_point soft_limit_timepoint;
+std::chrono::steady_clock::time_point hard_limit_timepoint;
+bool use_time_limits = false;
 
 Move killer_moves[MAX_PLY][2];
 int history_heuristic[2][64][64];
@@ -927,6 +926,7 @@ std::vector<uint64_t> game_history_hashes; // Stores hashes of positions played 
 void reset_search_state() {
     nodes_searched = 0;
     stop_search_flag = false;
+    use_time_limits = false;
 }
 
 void reset_killers_and_history() {
@@ -940,10 +940,8 @@ void reset_killers_and_history() {
 bool check_time() {
     if (stop_search_flag) return true;
     if ((nodes_searched & 2047) == 0) { // Check time every 2048 nodes
-        if (search_budget_ms > 0) {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - search_start_timepoint).count();
-            if (elapsed >= search_budget_ms) {
+        if (use_time_limits) {
+            if (std::chrono::steady_clock::now() > hard_limit_timepoint) {
                 stop_search_flag = true;
                 return true;
             }
@@ -1304,12 +1302,9 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.2\n";
+            std::cout << "id name Amira 0.22\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
-            std::cout << "option name TimeUsageDivisor type spin default 25 min 10 max 50\n";
-            std::cout << "option name IncrementUsagePercent type spin default 80 min 0 max 100\n";
-            std::cout << "option name MaxTimeUsagePercent type spin default 80 min 40 max 100\n";
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) { // Initialize TT if not done yet (e.g., if setoption wasn't called)
@@ -1321,7 +1316,7 @@ void uci_loop() {
             std::string name_token, value_token, name_str, value_str_val;
             ss >> name_token; // Should be "name"
             if (name_token == "name") {
-                ss >> name_str; // e.g., "Hash" or "TimeUsageDivisor"
+                ss >> name_str; // e.g., "Hash"
                 ss >> value_token; // Should be "value"
                 ss >> value_str_val; // e.g., "64"
 
@@ -1332,12 +1327,6 @@ void uci_loop() {
                     } catch (...) { /* ignore parse error, keep default */ }
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
-                } else if (name_str == "TimeUsageDivisor") {
-                    try { g_time_usage_divisor = std::stoi(value_str_val); } catch(...) {}
-                } else if (name_str == "IncrementUsagePercent") {
-                    try { g_increment_usage_percent = std::stoi(value_str_val); } catch(...) {}
-                } else if (name_str == "MaxTimeUsagePercent") {
-                    try { g_max_time_usage_percent = std::stoi(value_str_val); } catch(...) {}
                 }
             }
         } else if (token == "ucinewgame") {
@@ -1429,49 +1418,34 @@ void uci_loop() {
                 continue; // Skip the rest of the "go" command logic
             }
 
-            int wtime = -1, btime = -1, winc = 0, binc = 0, movestogo = 0;
-            long long fixed_time_per_move = -1;
+            long long wtime = -1, btime = -1;
             int max_depth_to_search = MAX_PLY; // Default to effectively infinite depth
 
             std::string go_param;
             while(ss >> go_param) {
                 if (go_param == "wtime") ss >> wtime;
                 else if (go_param == "btime") ss >> btime;
-                else if (go_param == "winc") ss >> winc;
-                else if (go_param == "binc") ss >> binc;
-                else if (go_param == "movestogo") ss >> movestogo;
-                else if (go_param == "movetime") ss >> fixed_time_per_move;
                 else if (go_param == "depth") ss >> max_depth_to_search;
-                // Ignore "ponder", "infinite", etc. for now
+                // Ignore other time params like winc, binc, movestogo, movetime
             }
+            
+            reset_search_state(); // Reset nodes, stop_flag, use_time_limits
+            search_start_timepoint = std::chrono::steady_clock::now();
 
             // Time management
-            if (fixed_time_per_move != -1) {
-                search_budget_ms = std::max(10LL, fixed_time_per_move - 50); // Leave a small margin
+            long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
+
+            if (time_alotment_ms != -1) {
+                use_time_limits = true;
+                // Calculate durations in seconds based on total time, then convert to chrono duration
+                double soft_limit_s = time_alotment_ms * 0.000054;
+                double hard_limit_s = time_alotment_ms * 0.0004;
+                
+                soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
+                hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
             } else {
-                int my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
-                int my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
-
-                if (my_time != -1) { // Time controls are set
-                    long long base_time_slice;
-                    if (movestogo > 0 && movestogo < 40) { // Use movestogo if available and reasonable
-                        base_time_slice = my_time / std::max(1, movestogo);
-                    } else {
-                        base_time_slice = my_time / std::max(1, g_time_usage_divisor);
-                    }
-                    search_budget_ms = base_time_slice + (long long)(my_inc * (g_increment_usage_percent / 100.0)) - 50;
-                    
-                    if (my_time > 100 && search_budget_ms > my_time * (g_max_time_usage_percent / 100.0)) {
-                        search_budget_ms = (long long)(my_time * (g_max_time_usage_percent / 100.0));
-                    }
-                } else {
-                    search_budget_ms = 2000; // Default fixed time if no time controls given (e.g. analysis)
-                }
+                use_time_limits = false; // Infinite search
             }
-            if (search_budget_ms <= 0) search_budget_ms = 50; // Ensure a minimum search time
-
-            search_start_timepoint = std::chrono::steady_clock::now();
-            reset_search_state(); // Reset nodes, stop_flag
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
@@ -1563,15 +1537,15 @@ void uci_loop() {
                     }
                 }
                 std::cout << std::endl; // End of info line
+                
+                // Soft time limit check
+                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
+                    break;
+                }
 
                 // Early exit conditions for iterative deepening
                 if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break; // Found a mate
-                if (search_budget_ms > 0 && elapsed_ms > 0 && depth > 1) { // Time-based exit
-                    // Heuristic: if we've used a significant fraction of time, consider stopping
-                    if (elapsed_ms * 2.5 > search_budget_ms && depth > 3) break; // More aggressive for deeper searches
-                    else if (elapsed_ms * 1.8 > search_budget_ms ) break; // General case
-                }
-                 if (depth >= max_depth_to_search) break; // Reached UCI depth limit
+                if (depth >= max_depth_to_search) break; // Reached UCI depth limit
             }
 
             // Output bestmove
