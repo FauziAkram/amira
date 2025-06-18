@@ -914,7 +914,7 @@ std::chrono::steady_clock::time_point search_start_timepoint;
 bool stop_search_flag = false;
 uint64_t nodes_searched = 0;
 
-// New time management globals
+// Time management globals
 std::chrono::steady_clock::time_point soft_limit_timepoint;
 std::chrono::steady_clock::time_point hard_limit_timepoint;
 bool use_time_limits = false;
