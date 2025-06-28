@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
+#include <thread>
+#include <atomic>
+#include <mutex>
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -20,6 +23,7 @@ enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 256;
+constexpr int MAX_THREADS = 128; // A reasonable maximum
 
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
@@ -45,11 +49,45 @@ const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,
 // Forward Declarations
 struct Move;
 struct Position;
+struct ThreadData;
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
+void reset_killers_and_history();
+
+
+// --- Threading Infrastructure ---
+int g_num_threads = 1;
+
+struct ThreadData {
+    int thread_id = 0;
+    Move killer_moves[MAX_PLY][2];
+    int history_heuristic[2][64][64];
+    std::vector<uint64_t> current_search_path_hashes;
+
+    ThreadData(int id = 0) : thread_id(id) {
+        reset();
+    }
+
+    void reset() {
+        std::memset(killer_moves, 0, sizeof(killer_moves));
+        std::memset(history_heuristic, 0, sizeof(history_heuristic));
+        current_search_path_hashes.clear();
+    }
+};
+
+std::vector<ThreadData> g_thread_data;
+
+void init_threads(int num_threads) {
+    g_num_threads = std::max(1, std::min(num_threads, MAX_THREADS));
+    g_thread_data.assign(g_num_threads, ThreadData());
+    for(int i = 0; i < g_num_threads; ++i) {
+        g_thread_data[i].thread_id = i;
+    }
+}
+// --- End Threading Infrastructure ---
 
 
 // --- Zobrist Hashing ---
@@ -908,16 +946,14 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
 
 // --- Search ---
 std::chrono::steady_clock::time_point search_start_timepoint;
-bool stop_search_flag = false;
-uint64_t nodes_searched = 0;
+std::atomic<bool> stop_search_flag = false;
+std::atomic<uint64_t> nodes_searched = 0;
 
 // Time management globals
 std::chrono::steady_clock::time_point soft_limit_timepoint;
 std::chrono::steady_clock::time_point hard_limit_timepoint;
 bool use_time_limits = false;
 
-Move killer_moves[MAX_PLY][2];
-int history_heuristic[2][64][64];
 std::vector<uint64_t> game_history_hashes; // Stores hashes of positions played in the game for 3-fold repetition
 
 void reset_search_state() {
@@ -927,16 +963,19 @@ void reset_search_state() {
 }
 
 void reset_killers_and_history() {
-    for(int i=0; i<MAX_PLY; ++i) {
-        killer_moves[i][0] = NULL_MOVE;
-        killer_moves[i][1] = NULL_MOVE;
+    if (g_thread_data.empty()) {
+        init_threads(g_num_threads);
     }
-    std::memset(history_heuristic, 0, sizeof(history_heuristic));
+    for (auto& td : g_thread_data) {
+        td.reset();
+    }
 }
 
 bool check_time() {
     if (stop_search_flag) return true;
-    if ((nodes_searched & 2047) == 0) { // Check time every 2048 nodes
+    // Only the main thread (thread 0) checks the time to avoid contention and redundant checks.
+    // It sets the atomic stop_search_flag which all other threads will see.
+    if (g_thread_data[0].thread_id == 0 && (nodes_searched & 2047) == 0) {
         if (use_time_limits) {
             if (std::chrono::steady_clock::now() > hard_limit_timepoint) {
                 stop_search_flag = true;
@@ -944,12 +983,12 @@ bool check_time() {
             }
         }
     }
-    return false;
+    return stop_search_flag;
 }
 
 const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
 
-void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
+void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply, ThreadData& td) {
     for (int i = 0; i < num_moves; ++i) {
         Move& m = moves[i];
         if (!tt_move.is_null() && m == tt_move) {
@@ -963,13 +1002,13 @@ void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt
                 m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
             } else if (m.promotion != NO_PIECE) {
                  m.score = 900000 + mvv_lva_piece_values[m.promotion];
-            } else if (ply < MAX_PLY && !killer_moves[ply][0].is_null() && m == killer_moves[ply][0]) {
+            } else if (ply < MAX_PLY && !td.killer_moves[ply][0].is_null() && m == td.killer_moves[ply][0]) {
                 m.score = 800000; // First killer move
-            } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
+            } else if (ply < MAX_PLY && !td.killer_moves[ply][1].is_null() && m == td.killer_moves[ply][1]) {
                 m.score = 700000; // Second killer move
             } else {
                 // History heuristic for quiet moves
-                m.score = history_heuristic[pos.side_to_move][m.from][m.to];
+                m.score = td.history_heuristic[pos.side_to_move][m.from][m.to];
             }
         }
     }
@@ -977,7 +1016,7 @@ void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt
     std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){ return a.score > b.score; });
 }
 
-int quiescence_search(Position& pos, int alpha, int beta, int ply) {
+int quiescence_search(Position& pos, int alpha, int beta, int ply, ThreadData& td) {
     nodes_searched++;
     if (check_time() || ply >= MAX_PLY - 1) return evaluate(pos);
 
@@ -999,7 +1038,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     int num_q_moves = generate_moves(pos, q_moves, !in_check);
 
     Move dummy_tt_move = NULL_MOVE; // No TT move in qsearch for ordering in this simplified version
-    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply);
+    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply, td);
 
     int legal_moves_in_qsearch = 0;
     for (int i = 0; i < num_q_moves; ++i) {
@@ -1009,7 +1048,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (!legal) continue;
         legal_moves_in_qsearch++;
 
-        int score = -quiescence_search(next_pos, -beta, -alpha, ply + 1);
+        int score = -quiescence_search(next_pos, -beta, -alpha, ply + 1, td);
 
         if (score >= beta) return beta; // Fail-high
         if (score > alpha) alpha = score;
@@ -1024,13 +1063,13 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 }
 
 
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, std::vector<uint64_t>& current_search_path_hashes) {
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, ThreadData& td) {
     nodes_searched++;
     if (check_time()) return 0; // Search budget exceeded
     if (ply >= MAX_PLY -1) return evaluate(pos); // Max ply reached
 
     // Repetition detection within the current search path
-    for (uint64_t path_hash : current_search_path_hashes) {
+    for (uint64_t path_hash : td.current_search_path_hashes) {
         if (path_hash == pos.zobrist_hash) return 0; // Draw by repetition in current path
     }
     // Check against game history for 3-fold repetition
@@ -1050,7 +1089,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (in_check) depth = std::max(depth + 1, depth); // Extend search if in check
 
     // Leaf node or quiescence search
-    if (depth <= 0) return quiescence_search(pos, alpha, beta, ply);
+    if (depth <= 0) return quiescence_search(pos, alpha, beta, ply, td);
 
     int original_alpha = alpha;
     Move tt_move = NULL_MOVE;
@@ -1075,9 +1114,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1; // Increment ply
 
             int R_nmp = (depth > 6) ? 3 : 2; // Adaptive reduction for NMP
-            current_search_path_hashes.push_back(pos.zobrist_hash); // Add current pos for child's rep check
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, current_search_path_hashes);
-            current_search_path_hashes.pop_back(); // Backtrack
+            td.current_search_path_hashes.push_back(pos.zobrist_hash); // Add current pos for child's rep check
+            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, td);
+            td.current_search_path_hashes.pop_back(); // Backtrack
 
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -1089,13 +1128,13 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     Move moves[256];
     int num_moves = generate_moves(pos, moves, false);
-    score_moves(pos, moves, num_moves, tt_move, ply);
+    score_moves(pos, moves, num_moves, tt_move, ply, td);
 
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
+    td.current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
 
     for (int i = 0; i < num_moves; ++i) {
         const Move& current_move = moves[i];
@@ -1108,7 +1147,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Principal Variation Search (PVS)
         if (legal_moves_played == 1) { // First move is searched with full window
-            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_search_path_hashes);
+            score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, td);
         } else { // Subsequent moves: LMR then PVS re-search if necessary
             // Late Move Reduction (LMR)
             int R_lmr = 0;
@@ -1124,16 +1163,16 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
 
             // Search with reduced depth and null window
-            score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+            score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, td);
 
-            // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth            
+            // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth
             // If the PVS null window search (or the LMR search) failed high, a re-search with the full window is required.
-            if (score > alpha && score < beta) { 
-                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
+            if (score > alpha && score < beta) {
+                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, td); // Re-search with full window
             }
         }
 
-        if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
+        if (stop_search_flag) { td.current_search_path_hashes.pop_back(); return 0; }
 
         if (score > best_score) {
             best_score = score;
@@ -1143,22 +1182,22 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 if (score >= beta) { // Beta cutoff
                     // Store killer move and update history heuristic for non-captures causing cutoff
                     if (ply < MAX_PLY && pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
-                        if (!(current_move == killer_moves[ply][0])) {
-                            killer_moves[ply][1] = killer_moves[ply][0];
-                            killer_moves[ply][0] = current_move;
+                        if (!(current_move == td.killer_moves[ply][0])) {
+                            td.killer_moves[ply][1] = td.killer_moves[ply][0];
+                            td.killer_moves[ply][0] = current_move;
                         }
                         // Increase history score for this move
-                        if(history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
-                            history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
+                        if(td.history_heuristic[pos.side_to_move][current_move.from][current_move.to] < (30000 - depth*depth) ) // Cap history
+                            td.history_heuristic[pos.side_to_move][current_move.from][current_move.to] += depth * depth;
                     }
-                    current_search_path_hashes.pop_back(); // Backtrack
+                    td.current_search_path_hashes.pop_back(); // Backtrack
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta; // Fail-high
                 }
             }
         }
     }
-    current_search_path_hashes.pop_back(); // Backtrack from current position
+    td.current_search_path_hashes.pop_back(); // Backtrack from current position
 
     // Handle stalemate or checkmate
     if (legal_moves_played == 0) {
@@ -1298,9 +1337,10 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.24\n";
+            std::cout << "id name Amira 0.24-smp\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
+            std::cout << "option name Threads type spin default 1 min 1 max " << MAX_THREADS << "\n";
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) { // Initialize TT if not done yet (e.g., if setoption wasn't called)
@@ -1323,6 +1363,11 @@ void uci_loop() {
                     } catch (...) { /* ignore parse error, keep default */ }
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
+                } else if (name_str == "Threads") {
+                    try {
+                        int parsed_threads = std::stoi(value_str_val);
+                        init_threads(parsed_threads); // Re-initialize thread data structures
+                    } catch (...) { /* ignore parse error, keep default */ }
                 }
             }
         } else if (token == "ucinewgame") {
@@ -1426,7 +1471,6 @@ void uci_loop() {
                 // Ignore other time params like winc, binc, movestogo, movetime
             }
 
-            reset_search_state(); // Reset nodes, stop_flag, use_time_limits
             search_start_timepoint = std::chrono::steady_clock::now();
 
             // Time management
@@ -1446,7 +1490,6 @@ void uci_loop() {
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
-            std::vector<uint64_t> root_path_hashes; // Empty for root call
 
             // Aspiration Windows
             int aspiration_alpha = -INF_SCORE;
@@ -1454,18 +1497,35 @@ void uci_loop() {
             int aspiration_window_delta = 25; // Initial aspiration window size
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
+                reset_search_state(); // Resets atomics: stop_flag, nodes_searched
+
+                std::vector<std::thread> search_threads;
                 int current_score;
-                if (depth <= 1) { // No aspiration for very shallow depths
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, root_path_hashes);
-                } else {
-                    // Search with aspiration window
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, root_path_hashes);
-                    // If search failed high or low, re-search with wider/full window
-                    if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
-                        aspiration_alpha = -INF_SCORE; // Reset for full search
-                        aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, root_path_hashes);
-                    }
+
+                // Launch helper threads (N-1 of them)
+                for (int i = 1; i < g_num_threads; ++i) {
+                    search_threads.emplace_back([&, i, depth, aspiration_alpha, aspiration_beta] {
+                        Position thread_root_pos = uci_root_pos; // Each thread gets its own copy of the root
+                        search(thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[i]);
+                    });
+                }
+
+                // Main thread (thread 0) also searches. Its result drives the aspiration window logic.
+                Position main_thread_root_pos = uci_root_pos;
+                current_score = search(main_thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[0]);
+
+                // If search failed high or low, re-search with wider/full window on the main thread
+                // Helper threads will continue their old search but their work still contributes to the TT.
+                if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
+                    aspiration_alpha = -INF_SCORE;
+                    aspiration_beta = INF_SCORE;
+                    main_thread_root_pos = uci_root_pos; // Make a fresh copy for clarity
+                    current_score = search(main_thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[0]);
+                }
+
+                // Wait for all helper threads to finish their work for this depth
+                for (auto& th : search_threads) {
+                    th.join();
                 }
 
                 if (stop_search_flag && depth > 1) break; // Time's up, use results from previous iteration
@@ -1502,6 +1562,7 @@ void uci_loop() {
                 auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
                 if (elapsed_ms < 0) elapsed_ms = 0; // Should not happen
 
+                // The main thread (thread 0) is the only one that prints info lines
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
                 if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ; // White mates
                 else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2; // Black mates
@@ -1583,7 +1644,8 @@ int main(int argc, char* argv[]) {
     init_zobrist();
     init_attack_tables();
     init_eval_masks();
-    reset_killers_and_history(); // Initialize killers and history table
+    init_threads(g_num_threads); // Initialize for 1 thread by default
+    reset_killers_and_history(); // Initialize killers and history table for the initial thread
 
     // TT will be initialized on first "isready" or "setoption" or "go"
 
