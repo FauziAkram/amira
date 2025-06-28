@@ -1123,17 +1123,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 if (R_lmr < 0) R_lmr = 0;
             }
 
+            // --- LMR/PVS FIX STARTS HERE ---
             // Search with reduced depth and null window
             score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
 
             // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth
-            if (R_lmr > 0 && score > alpha) {
-                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
-            }
-            // If PVS null window search still failed high, re-search with full window
-            if (score > alpha && score < beta) { // Only if it's a PV node candidate
+            // THIS BLOCK IS REMOVED AS IT'S A REDUNDANT RE-SEARCH WITH A NULL WINDOW
+            // if (R_lmr > 0 && score > alpha) {
+            //      score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
+            // }
+            
+            // If the PVS null window search (or the LMR search) failed high, a re-search with the full window is required.
+            if (score > alpha && score < beta) { 
                  score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
             }
+            // --- LMR/PVS FIX ENDS HERE ---
         }
 
         if (stop_search_flag) { current_search_path_hashes.pop_back(); return 0; }
