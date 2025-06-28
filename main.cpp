@@ -47,7 +47,7 @@ struct Move;
 struct Position;
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
-int generate_moves(const Position& pos, Move* moves_list, bool captures_only); // MODIFIED
+int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 
@@ -266,7 +266,7 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     return false;
 }
 
-// --- Move Generation --- // MODIFIED SECTION
+// --- Move Generation --- //
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     int move_count = 0;
     int stm = pos.side_to_move;
@@ -949,7 +949,6 @@ bool check_time() {
 
 const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
 
-// MODIFIED SECTION
 void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
     for (int i = 0; i < num_moves; ++i) {
         Move& m = moves[i];
@@ -996,15 +995,15 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
 
-    Move q_moves[256]; // MODIFIED
-    int num_q_moves = generate_moves(pos, q_moves, !in_check); // MODIFIED
+    Move q_moves[256];
+    int num_q_moves = generate_moves(pos, q_moves, !in_check);
 
     Move dummy_tt_move = NULL_MOVE; // No TT move in qsearch for ordering in this simplified version
-    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply); // MODIFIED
+    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply);
 
     int legal_moves_in_qsearch = 0;
-    for (int i = 0; i < num_q_moves; ++i) { // MODIFIED
-        const Move& cap_move = q_moves[i]; // MODIFIED
+    for (int i = 0; i < num_q_moves; ++i) {
+        const Move& cap_move = q_moves[i];
         bool legal;
         Position next_pos = make_move(pos, cap_move, legal);
         if (!legal) continue;
@@ -1088,9 +1087,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-    Move moves[256]; // MODIFIED
-    int num_moves = generate_moves(pos, moves, false); // MODIFIED
-    score_moves(pos, moves, num_moves, tt_move, ply); // MODIFIED
+    Move moves[256];
+    int num_moves = generate_moves(pos, moves, false);
+    score_moves(pos, moves, num_moves, tt_move, ply);
 
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
@@ -1098,8 +1097,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
 
-    for (int i = 0; i < num_moves; ++i) { // MODIFIED
-        const Move& current_move = moves[i]; // MODIFIED
+    for (int i = 0; i < num_moves; ++i) {
+        const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
@@ -1395,11 +1394,11 @@ void uci_loop() {
             }
 
             // Check for single legal move case
-            Move root_pseudo_moves[256]; // MODIFIED
-            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false); // MODIFIED
+            Move root_pseudo_moves[256];
+            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
-            for (int i = 0; i < num_pseudo_moves; ++i) { // MODIFIED
-                const Move& m = root_pseudo_moves[i]; // MODIFIED
+            for (int i = 0; i < num_pseudo_moves; ++i) {
+                const Move& m = root_pseudo_moves[i];
                 bool is_legal_flag;
                 make_move(uci_root_pos, m, is_legal_flag); // This call checks legality
                 if (is_legal_flag) {
@@ -1554,11 +1553,11 @@ void uci_loop() {
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
             } else {
                 // Fallback: if no move found (e.g. instant timeout or bug), pick first legal move
-                Move legal_moves_fallback[256]; // MODIFIED
-                int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false); // MODIFIED
+                Move legal_moves_fallback[256];
+                int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
                 bool found_one_legal_fallback = false;
-                for(int i = 0; i < num_fallback_moves; ++i) { // MODIFIED
-                    const auto& m_fall = legal_moves_fallback[i]; // MODIFIED
+                for(int i = 0; i < num_fallback_moves; ++i) {
+                    const auto& m_fall = legal_moves_fallback[i];
                     bool is_leg_fall;
                     Position temp_p = make_move(uci_root_pos, m_fall, is_leg_fall); // Check legality
                     if(is_leg_fall) {
