@@ -1337,7 +1337,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.24-smp\n";
+            std::cout << "id name Amira 0.24-smp-fixed\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "option name Threads type spin default 1 min 1 max " << MAX_THREADS << "\n";
@@ -1448,110 +1448,101 @@ void uci_loop() {
                 }
             }
 
-            // If there's only one legal move, play it immediately.
             if (root_legal_moves.size() == 1) {
                 std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
-                continue; // Skip the rest of the "go" command logic
+                continue;
             }
-
-            // If there are no legal moves (checkmate/stalemate), output null move.
             if (root_legal_moves.empty()) {
                 std::cout << "bestmove 0000" << std::endl;
-                continue; // Skip the rest of the "go" command logic
+                continue;
             }
 
             long long wtime = -1, btime = -1;
-            int max_depth_to_search = MAX_PLY; // Default to effectively infinite depth
+            int max_depth_to_search = MAX_PLY;
 
             std::string go_param;
             while(ss >> go_param) {
                 if (go_param == "wtime") ss >> wtime;
                 else if (go_param == "btime") ss >> btime;
                 else if (go_param == "depth") ss >> max_depth_to_search;
-                // Ignore other time params like winc, binc, movestogo, movetime
             }
 
+            reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
 
-            // Time management
             long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
-
             if (time_alotment_ms != -1) {
                 use_time_limits = true;
-                // Calculate durations in seconds based on total time, then convert to chrono duration
+                // *** Reverted to original time management constants ***
                 double soft_limit_s = time_alotment_ms * 0.000054;
                 double hard_limit_s = time_alotment_ms * 0.0004;
 
                 soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                 hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
             } else {
-                use_time_limits = false; // Infinite search
+                use_time_limits = false;
             }
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
-
-            // Aspiration Windows
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
-            int aspiration_window_delta = 25; // Initial aspiration window size
+            int aspiration_window_delta = 25;
+            std::vector<std::thread> search_threads;
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
-                reset_search_state(); // Resets atomics: stop_flag, nodes_searched
+                nodes_searched = 0; // Reset nodes per depth for cleaner NPS reporting
 
-                std::vector<std::thread> search_threads;
-                int current_score;
-
-                // Launch helper threads (N-1 of them)
+                // Launch helper threads
                 for (int i = 1; i < g_num_threads; ++i) {
                     search_threads.emplace_back([&, i, depth, aspiration_alpha, aspiration_beta] {
-                        Position thread_root_pos = uci_root_pos; // Each thread gets its own copy of the root
+                        Position thread_root_pos = uci_root_pos;
                         search(thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[i]);
                     });
                 }
 
-                // Main thread (thread 0) also searches. Its result drives the aspiration window logic.
+                // Main thread searches
                 Position main_thread_root_pos = uci_root_pos;
-                current_score = search(main_thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[0]);
+                int current_score = search(main_thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[0]);
 
-                // If search failed high or low, re-search with wider/full window on the main thread
-                // Helper threads will continue their old search but their work still contributes to the TT.
                 if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                     aspiration_alpha = -INF_SCORE;
                     aspiration_beta = INF_SCORE;
-                    main_thread_root_pos = uci_root_pos; // Make a fresh copy for clarity
+                    main_thread_root_pos = uci_root_pos;
                     current_score = search(main_thread_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, g_thread_data[0]);
                 }
 
-                // Wait for all helper threads to finish their work for this depth
+                // *** FIX: Check for stop signal BEFORE blocking on join() ***
+                // If time is up, we must break immediately to report the result from the PREVIOUS depth.
+                // We will clean up the threads later.
+                if (stop_search_flag && depth > 1) {
+                    break;
+                }
+
+                // Wait for helpers to finish THIS depth's search before printing info
                 for (auto& th : search_threads) {
                     th.join();
                 }
+                search_threads.clear(); // Clear the vector for the next iteration
 
-                if (stop_search_flag && depth > 1) break; // Time's up, use results from previous iteration
-
-                // Update aspiration window for next iteration if search was successful
                 if (abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
                     aspiration_alpha = current_score - aspiration_window_delta;
                     aspiration_beta = current_score + aspiration_window_delta;
-                    aspiration_window_delta += aspiration_window_delta / 3 + 5; // Increase window slightly
-                    if (aspiration_window_delta > 300) aspiration_window_delta = 300; // Cap window size
-                } else { // Mate score or other boundary, reset to full window
+                    aspiration_window_delta += aspiration_window_delta / 3 + 5;
+                    if (aspiration_window_delta > 300) aspiration_window_delta = 300;
+                } else {
                     aspiration_alpha = -INF_SCORE;
                     aspiration_beta = INF_SCORE;
-                    aspiration_window_delta = 50; // Reset delta for next non-mate score
+                    aspiration_window_delta = 50;
                 }
 
                 Move tt_root_move = NULL_MOVE; int tt_root_score;
                 int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
-                // Retrieve best move from TT for this depth. Search populates it.
                 if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
                      if (!tt_root_move.is_null()) uci_best_move_overall = tt_root_move;
-                     best_score_overall = current_score; // The score from search is more reliable than TT's raw score here
-                } else {
-                     // Fallback if probe_tt doesn't give a move (e.g. depth mismatch but entry exists)
                      best_score_overall = current_score;
-                     // Try to get best move directly if hash matches, even if depth criteria not met by probe_tt
+                } else {
+                     best_score_overall = current_score;
                      TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
                      if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
                          uci_best_move_overall = root_entry_check.best_move;
@@ -1560,94 +1551,89 @@ void uci_loop() {
 
                 auto now_tp = std::chrono::steady_clock::now();
                 auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
-                if (elapsed_ms < 0) elapsed_ms = 0; // Should not happen
+                if (elapsed_ms < 0) elapsed_ms = 0;
 
-                // The main thread (thread 0) is the only one that prints info lines
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
-                if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ; // White mates
-                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2; // Black mates
+                if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
+                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2;
                 std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
                 if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
 
-                // Print PV
                 if (!uci_best_move_overall.is_null()) {
                     std::cout << " pv";
                     Position temp_pos = uci_root_pos;
                     for (int pv_idx = 0; pv_idx < depth; ++pv_idx) {
                         Move pv_m; int pv_s; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
-                        // Probe TT for the best move from the current temp_pos
-                        // We only need *a* move, so depth 1 probe is fine if deeper not available
                         if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s) && !pv_m.is_null()) {
                             bool legal_pv;
                             Position next_temp_pos = make_move(temp_pos, pv_m, legal_pv);
                             if (legal_pv) {
                                 std::cout << " " << move_to_uci(pv_m);
                                 temp_pos = next_temp_pos;
-                            } else { // Should not happen if TT stores legal moves
-                                if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall); // At least print first move
+                            } else {
+                                if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                                 break;
                             }
-                        } else { // No move from TT for this PV node
-                            if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall); // Print first move if others not found
+                        } else {
+                            if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                             break;
                         }
-                        if (stop_search_flag) break; // Stop printing PV if search is stopping
+                        if (stop_search_flag) break;
                     }
                 }
-                std::cout << std::endl; // End of info line
+                std::cout << std::endl;
 
-                // Soft time limit check
                 if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
                     break;
                 }
-
-                // Early exit conditions for iterative deepening
-                if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break; // Found a mate
-                if (depth >= max_depth_to_search) break; // Reached UCI depth limit
+                if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
             }
 
-            // Output bestmove
+            // Ensure all threads are stopped and cleaned up before we proceed.
+            stop_search_flag = true;
+            for (auto& th : search_threads) {
+                if (th.joinable()) {
+                    th.join();
+                }
+            }
+
             if (!uci_best_move_overall.is_null()) {
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
             } else {
-                // Fallback: if no move found (e.g. instant timeout or bug), pick first legal move
                 Move legal_moves_fallback[256];
                 int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
                 bool found_one_legal_fallback = false;
                 for(int i = 0; i < num_fallback_moves; ++i) {
                     const auto& m_fall = legal_moves_fallback[i];
                     bool is_leg_fall;
-                    Position temp_p = make_move(uci_root_pos, m_fall, is_leg_fall); // Check legality
+                    make_move(uci_root_pos, m_fall, is_leg_fall);
                     if(is_leg_fall) {
                         std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
                         found_one_legal_fallback = true;
                         break;
                     }
                 }
-                if (!found_one_legal_fallback) { // No legal moves at all (checkmate/stalemate)
-                     std::cout << "bestmove 0000\n" << std::flush; // UCI null move
+                if (!found_one_legal_fallback) {
+                     std::cout << "bestmove 0000\n" << std::flush;
                 }
             }
 
         } else if (token == "quit" || token == "stop") {
-            stop_search_flag = true; // Signal search to stop
-            if (token == "quit") break; // Exit UCI loop
+            stop_search_flag = true;
+            if (token == "quit") break;
         }
-        // Unknown command, ignore
     }
 }
 
 int main(int argc, char* argv[]) {
-    std::ios_base::sync_with_stdio(false); // Faster I/O
+    std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
     init_zobrist();
     init_attack_tables();
     init_eval_masks();
-    init_threads(g_num_threads); // Initialize for 1 thread by default
-    reset_killers_and_history(); // Initialize killers and history table for the initial thread
-
-    // TT will be initialized on first "isready" or "setoption" or "go"
+    init_threads(g_num_threads);
+    reset_killers_and_history();
 
     uci_loop();
     return 0;
