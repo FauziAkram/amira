@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
-#include <cmath>    // --- ADDED --- For std::abs
+#include <cmath>    // For std::abs
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -570,7 +570,7 @@ uint64_t black_passed_pawn_block_mask[64];
 const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
 const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
 
-// --- ADDED: Evaluation Constants for New Features ---
+// Evaluation Constants
 const int TEMPO_BONUS = 8;
 
 const int protected_pawn_bonus_mg = 8;
@@ -669,7 +669,7 @@ int evaluate(const Position& pos) {
     int eg_score = 0;
     int game_phase = 0;
     
-    // --- ADDED --- Mobility score accumulators
+    // Mobility score accumulators
     int mg_mobility_score = 0;
     int eg_mobility_score = 0;
 
@@ -677,7 +677,7 @@ int evaluate(const Position& pos) {
         Color current_eval_color = (Color)c_idx;
         int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
         
-        // --- ADDED --- Helper bitboards for mobility and pawn structure
+        // Helper bitboards for mobility and pawn structure
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t attackable_squares = ~friendly_pieces;
         uint64_t occupied = pos.get_occupied_bb();
@@ -698,7 +698,7 @@ int evaluate(const Position& pos) {
                 eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
 
                 if ((Piece)p == PAWN) {
-                    // --- ADDED --- Isolated and Protected Pawn Evaluation
+                    // Isolated and Protected Pawn Evaluation
                     int f = sq % 8;
                     bool is_isolated = true;
                     if (f > 0 && (file_bb_mask[f - 1] & all_friendly_pawns) != 0) is_isolated = false;
@@ -726,7 +726,7 @@ int evaluate(const Position& pos) {
                         mg_score += side_multiplier * passed_pawn_bonus_mg[rank_from_own_side];
                         eg_score += side_multiplier * passed_pawn_bonus_eg[rank_from_own_side];
                         
-                        // --- ADDED --- Passed Pawn distance to enemy king
+                        // Passed Pawn distance to enemy king
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[1 - current_eval_color]);
                         if (enemy_king_sq != -1) {
                             int pawn_rank = sq / 8; int pawn_file = sq % 8;
@@ -744,13 +744,13 @@ int evaluate(const Position& pos) {
                         if (!enemy_pawn_on_file) { mg_score += side_multiplier * 20; eg_score += side_multiplier * 15; }
                         else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 5;}
                     }
-                    // --- ADDED --- Rook Mobility
+                    // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) & attackable_squares;
                     int mobility_count = pop_count(mobility_attacks);
                     mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_eg;
                 }
-                // --- ADDED --- Mobility for other pieces
+                // Mobility for other pieces
                 else if ((Piece)p == KNIGHT) {
                     uint64_t mobility_attacks = knight_attacks_bb[sq] & attackable_squares;
                     int mobility_count = pop_count(mobility_attacks);
@@ -889,11 +889,11 @@ int evaluate(const Position& pos) {
         }
     }
 
-    // --- ADDED --- Incorporate mobility scores
+    // Incorporate mobility scores
     mg_score += mg_mobility_score;
     eg_score += eg_mobility_score;
 
-    // --- ADDED --- Add tempo bonus to the side to move
+    // Add tempo bonus to the side to move
     if (pos.side_to_move == WHITE) {
         mg_score += TEMPO_BONUS;
         eg_score += TEMPO_BONUS;
@@ -1390,7 +1390,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.24\n";
+            std::cout << "id name Amira 0.25\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
