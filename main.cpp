@@ -47,7 +47,7 @@ struct Move;
 struct Position;
 int evaluate(const Position& pos);
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
-void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only = false);
+int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 
@@ -266,13 +266,9 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     return false;
 }
 
-// --- Move Generation ---
-void add_move_to_list(std::vector<Move>& moves_list, int from, int to, Piece promotion = NO_PIECE, int score = 0) {
-    moves_list.push_back({from, to, promotion, score});
-}
-
-void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool captures_only) {
-    moves_list.clear();
+// --- Move Generation --- //
+int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
+    int move_count = 0;
     int stm = pos.side_to_move;
     Color friendly_color = (Color)stm;
     Color enemy_color = (Color)(1 - stm);
@@ -292,10 +288,10 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
         int one_step_sq = (stm == WHITE) ? from + 8 : from - 8;
         if (one_step_sq >=0 && one_step_sq < 64 && get_bit(empty_squares, one_step_sq)) {
             if (rank == promotion_rank_idx) { // Reached promotion rank by one step
-                add_move_to_list(moves_list, from, one_step_sq, QUEEN); add_move_to_list(moves_list, from, one_step_sq, ROOK);
-                add_move_to_list(moves_list, from, one_step_sq, BISHOP); add_move_to_list(moves_list, from, one_step_sq, KNIGHT);
+                moves_list[move_count++] = {from, one_step_sq, QUEEN}; moves_list[move_count++] = {from, one_step_sq, ROOK};
+                moves_list[move_count++] = {from, one_step_sq, BISHOP}; moves_list[move_count++] = {from, one_step_sq, KNIGHT};
             } else if (!captures_only) {
-                add_move_to_list(moves_list, from, one_step_sq);
+                moves_list[move_count++] = {from, one_step_sq};
             }
             // Double pawn push (only if single push is also possible and not captures_only)
             if (!captures_only) {
@@ -303,7 +299,7 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
                 if (rank == start_rank_idx) {
                     int two_steps_sq = (stm == WHITE) ? from + 16 : from - 16;
                     if (two_steps_sq >=0 && two_steps_sq < 64 && get_bit(empty_squares, two_steps_sq)) {
-                        add_move_to_list(moves_list, from, two_steps_sq);
+                        moves_list[move_count++] = {from, two_steps_sq};
                     }
                 }
             }
@@ -319,10 +315,10 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
             int to = lsb_index(pawn_cap_targets);
             pawn_cap_targets &= pawn_cap_targets - 1;
             if (rank == promotion_rank_idx) { // Reached promotion rank by capture
-                add_move_to_list(moves_list, from, to, QUEEN); add_move_to_list(moves_list, from, to, ROOK);
-                add_move_to_list(moves_list, from, to, BISHOP); add_move_to_list(moves_list, from, to, KNIGHT);
+                moves_list[move_count++] = {from, to, QUEEN}; moves_list[move_count++] = {from, to, ROOK};
+                moves_list[move_count++] = {from, to, BISHOP}; moves_list[move_count++] = {from, to, KNIGHT};
             } else {
-                add_move_to_list(moves_list, from, to);
+                moves_list[move_count++] = {from, to};
             }
         }
     }
@@ -344,7 +340,7 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
             while (attacks) {
                 int to = lsb_index(attacks);
                 attacks &= attacks - 1;
-                add_move_to_list(moves_list, from, to);
+                moves_list[move_count++] = {from, to};
             }
         }
     }
@@ -357,27 +353,28 @@ void generate_moves(const Position& pos, std::vector<Move>& moves_list, bool cap
                 if ((pos.castling_rights & WK_CASTLE_MASK) && king_sq_idx == E1_SQ &&
                     !get_bit(occupied, E1_SQ + 1) && !get_bit(occupied, E1_SQ + 2) && // F1, G1 empty
                     !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ + 1, BLACK) && !is_square_attacked(pos, E1_SQ + 2, BLACK)) {
-                    add_move_to_list(moves_list, king_sq_idx, E1_SQ + 2); // King to G1
+                    moves_list[move_count++] = {king_sq_idx, E1_SQ + 2}; // King to G1
                 }
                 if ((pos.castling_rights & WQ_CASTLE_MASK) && king_sq_idx == E1_SQ &&
                     !get_bit(occupied, E1_SQ - 1) && !get_bit(occupied, E1_SQ - 2) && !get_bit(occupied, E1_SQ - 3) && // D1, C1, B1 empty
                     !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ - 1, BLACK) && !is_square_attacked(pos, E1_SQ - 2, BLACK)) {
-                    add_move_to_list(moves_list, king_sq_idx, E1_SQ - 2); // King to C1
+                    moves_list[move_count++] = {king_sq_idx, E1_SQ - 2}; // King to C1
                 }
             } else { // BLACK
                 if ((pos.castling_rights & BK_CASTLE_MASK) && king_sq_idx == E8_SQ &&
                     !get_bit(occupied, E8_SQ + 1) && !get_bit(occupied, E8_SQ + 2) && // F8, G8 empty
                     !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ + 1, WHITE) && !is_square_attacked(pos, E8_SQ + 2, WHITE)) {
-                    add_move_to_list(moves_list, king_sq_idx, E8_SQ + 2); // King to G8
+                    moves_list[move_count++] = {king_sq_idx, E8_SQ + 2}; // King to G8
                 }
                 if ((pos.castling_rights & BQ_CASTLE_MASK) && king_sq_idx == E8_SQ &&
                     !get_bit(occupied, E8_SQ - 1) && !get_bit(occupied, E8_SQ - 2) && !get_bit(occupied, E8_SQ - 3) && // D8, C8, B8 empty
                     !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ - 1, WHITE) && !is_square_attacked(pos, E8_SQ - 2, WHITE)) {
-                    add_move_to_list(moves_list, king_sq_idx, E8_SQ - 2); // King to C8
+                    moves_list[move_count++] = {king_sq_idx, E8_SQ - 2}; // King to C8
                 }
             }
         }
     }
+    return move_count;
 }
 
 // --- Make Move ---
@@ -624,7 +621,7 @@ bool is_insufficient_material(const Position& pos) {
     if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) {
         return true;
     }
-    
+
     // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
     if (white_minors == 1 && black_minors == 1) {
         return true;
@@ -635,7 +632,7 @@ bool is_insufficient_material(const Position& pos) {
         (white_minors == 0 && black_minors == 2 && black_knights == 2)) {
         return true;
     }
-    
+
     // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
     return false;
 }
@@ -952,8 +949,9 @@ bool check_time() {
 
 const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
 
-void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_move, int ply) {
-    for (Move& m : moves) {
+void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
+    for (int i = 0; i < num_moves; ++i) {
+        Move& m = moves[i];
         if (!tt_move.is_null() && m == tt_move) {
             m.score = 2000000; // TT move gets highest priority
         } else {
@@ -976,7 +974,7 @@ void score_moves(const Position& pos, std::vector<Move>& moves, const Move& tt_m
         }
     }
     // Sort moves by score in descending order
-    std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b){ return a.score > b.score; });
+    std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){ return a.score > b.score; });
 }
 
 int quiescence_search(Position& pos, int alpha, int beta, int ply) {
@@ -997,14 +995,15 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
 
-    std::vector<Move> q_moves;
-    generate_moves(pos, q_moves, !in_check); // Generate only captures if not in check, all moves if in check
+    Move q_moves[256];
+    int num_q_moves = generate_moves(pos, q_moves, !in_check);
 
     Move dummy_tt_move = NULL_MOVE; // No TT move in qsearch for ordering in this simplified version
-    score_moves(pos, q_moves, dummy_tt_move, ply); // Score moves (mostly for captures)
+    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply);
 
     int legal_moves_in_qsearch = 0;
-    for (const Move& cap_move : q_moves) {
+    for (int i = 0; i < num_q_moves; ++i) {
+        const Move& cap_move = q_moves[i];
         bool legal;
         Position next_pos = make_move(pos, cap_move, legal);
         if (!legal) continue;
@@ -1041,7 +1040,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     // 50-move rule
     if (pos.halfmove_clock >= 100 && ply > 0) return 0; // Draw
-    
+
     // Check for insufficient material draw
     if (ply > 0 && is_insufficient_material(pos)) return 0;
 
@@ -1088,9 +1087,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-    std::vector<Move> moves;
-    generate_moves(pos, moves);
-    score_moves(pos, moves, tt_move, ply); // Order moves
+    Move moves[256];
+    int num_moves = generate_moves(pos, moves, false);
+    score_moves(pos, moves, num_moves, tt_move, ply);
 
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
@@ -1098,7 +1097,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     current_search_path_hashes.push_back(pos.zobrist_hash); // Add current position to path for children
 
-    for (int i = 0; i < (int)moves.size(); ++i) {
+    for (int i = 0; i < num_moves; ++i) {
         const Move& current_move = moves[i];
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
@@ -1302,7 +1301,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.22\n";
+            std::cout << "id name Amira 0.23\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1395,10 +1394,11 @@ void uci_loop() {
             }
 
             // Check for single legal move case
-            std::vector<Move> root_pseudo_moves;
-            generate_moves(uci_root_pos, root_pseudo_moves);
+            Move root_pseudo_moves[256];
+            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
-            for (const Move& m : root_pseudo_moves) {
+            for (int i = 0; i < num_pseudo_moves; ++i) {
+                const Move& m = root_pseudo_moves[i];
                 bool is_legal_flag;
                 make_move(uci_root_pos, m, is_legal_flag); // This call checks legality
                 if (is_legal_flag) {
@@ -1411,7 +1411,7 @@ void uci_loop() {
                 std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
                 continue; // Skip the rest of the "go" command logic
             }
-            
+
             // If there are no legal moves (checkmate/stalemate), output null move.
             if (root_legal_moves.empty()) {
                 std::cout << "bestmove 0000" << std::endl;
@@ -1428,7 +1428,7 @@ void uci_loop() {
                 else if (go_param == "depth") ss >> max_depth_to_search;
                 // Ignore other time params like winc, binc, movestogo, movetime
             }
-            
+
             reset_search_state(); // Reset nodes, stop_flag, use_time_limits
             search_start_timepoint = std::chrono::steady_clock::now();
 
@@ -1440,7 +1440,7 @@ void uci_loop() {
                 // Calculate durations in seconds based on total time, then convert to chrono duration
                 double soft_limit_s = time_alotment_ms * 0.000054;
                 double hard_limit_s = time_alotment_ms * 0.0004;
-                
+
                 soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                 hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
             } else {
@@ -1537,7 +1537,7 @@ void uci_loop() {
                     }
                 }
                 std::cout << std::endl; // End of info line
-                
+
                 // Soft time limit check
                 if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
                     break;
@@ -1553,10 +1553,11 @@ void uci_loop() {
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
             } else {
                 // Fallback: if no move found (e.g. instant timeout or bug), pick first legal move
-                std::vector<Move> legal_moves_fallback;
-                generate_moves(uci_root_pos, legal_moves_fallback);
+                Move legal_moves_fallback[256];
+                int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
                 bool found_one_legal_fallback = false;
-                for(const auto& m_fall : legal_moves_fallback) {
+                for(int i = 0; i < num_fallback_moves; ++i) {
+                    const auto& m_fall = legal_moves_fallback[i];
                     bool is_leg_fall;
                     Position temp_p = make_move(uci_root_pos, m_fall, is_leg_fall); // Check legality
                     if(is_leg_fall) {
