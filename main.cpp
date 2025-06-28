@@ -46,8 +46,39 @@ const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 
 const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
 
 
+// --- Move Structure ---
+struct Move {
+    int from = 0, to = 0;
+    Piece promotion = NO_PIECE;
+    int score = 0;
+
+    bool operator==(const Move& other) const {
+        return from == other.from && to == other.to && promotion == other.promotion;
+    }
+    bool is_null() const { return from == 0 && to == 0 && promotion == NO_PIECE; }
+};
+
+const Move NULL_MOVE = {0, 0, NO_PIECE, 0};
+
+std::string move_to_uci(const Move& move) {
+    if (move.is_null()) return "0000";
+    std::string uci_move_str;
+    uci_move_str += (char)('a' + (move.from % 8));
+    uci_move_str += (char)('1' + (move.from / 8));
+    uci_move_str += (char)('a' + (move.to % 8));
+    uci_move_str += (char)('1' + (move.to / 8));
+    if (move.promotion != NO_PIECE) {
+        char promo_char = 'q';
+        if (move.promotion == KNIGHT) promo_char = 'n';
+        else if (move.promotion == BISHOP) promo_char = 'b';
+        else if (move.promotion == ROOK) promo_char = 'r';
+        uci_move_str += promo_char;
+    }
+    return uci_move_str;
+}
+
+
 // Forward Declarations
-struct Move;
 struct Position;
 struct ThreadData;
 int evaluate(const Position& pos);
@@ -107,37 +138,6 @@ void init_zobrist() {
     for (int i = 0; i < 65; ++i)
         zobrist_ep[i] = rng_zobrist();
     zobrist_side_to_move = rng_zobrist();
-}
-
-// --- Move Structure ---
-struct Move {
-    int from = 0, to = 0;
-    Piece promotion = NO_PIECE;
-    int score = 0;
-
-    bool operator==(const Move& other) const {
-        return from == other.from && to == other.to && promotion == other.promotion;
-    }
-    bool is_null() const { return from == 0 && to == 0 && promotion == NO_PIECE; }
-};
-
-const Move NULL_MOVE = {0, 0, NO_PIECE, 0};
-
-std::string move_to_uci(const Move& move) {
-    if (move.is_null()) return "0000";
-    std::string uci_move_str;
-    uci_move_str += (char)('a' + (move.from % 8));
-    uci_move_str += (char)('1' + (move.from / 8));
-    uci_move_str += (char)('a' + (move.to % 8));
-    uci_move_str += (char)('1' + (move.to / 8));
-    if (move.promotion != NO_PIECE) {
-        char promo_char = 'q';
-        if (move.promotion == KNIGHT) promo_char = 'n';
-        else if (move.promotion == BISHOP) promo_char = 'b';
-        else if (move.promotion == ROOK) promo_char = 'r';
-        uci_move_str += promo_char;
-    }
-    return uci_move_str;
 }
 
 // --- Bitboard Utilities ---
