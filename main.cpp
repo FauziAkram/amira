@@ -1066,13 +1066,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move; // Switch side
 
+            // --- ZOBRIST HASH FIX STARTS HERE ---
             // Update Zobrist for null move
             null_next_pos.zobrist_hash = pos.zobrist_hash;
-            if (pos.ep_square != -1) null_next_pos.zobrist_hash ^= zobrist_ep[pos.ep_square];
+
+            // Correctly update the Zobrist hash for the en passant square change.
+            // A null move always results in no en-passant square being possible on the next turn.
+            // First, XOR out the key for the *current* EP state (whether it's a square or "no EP").
+            null_next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
             null_next_pos.ep_square = -1; // EP square is lost after null move
-            null_next_pos.zobrist_hash ^= zobrist_ep[64]; // XOR out old EP, XOR in no EP
+            // Then, XOR in the key for the new state, which is always "no EP".
+            null_next_pos.zobrist_hash ^= zobrist_ep[64];
+
             null_next_pos.zobrist_hash ^= zobrist_side_to_move; // Flip side to move
             null_next_pos.ply = pos.ply + 1; // Increment ply
+            // --- ZOBRIST HASH FIX ENDS HERE ---
 
             int R_nmp = (depth > 6) ? 3 : 2; // Adaptive reduction for NMP
             current_search_path_hashes.push_back(pos.zobrist_hash); // Add current pos for child's rep check
