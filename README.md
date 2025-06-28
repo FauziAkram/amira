@@ -44,10 +44,10 @@ The engine is designed to be compiled with g++ using standard C++. No external l
 
 To compile:
 ```bash
-g++ -o Amira main.cpp -std=c++11 -O3 -Wall
+g++ -o Amira main.cpp -std=c++17 -O3 -march=native -flto
 
 
-(You can use a newer C++ standard like -std=c++17 or -std=c++20 if preferred, and adjust optimization flags as desired. -O3 is recommended for performance.)
+(You can use a newer C++ standard like -std=c++20 if preferred, and adjust optimization flags as desired. -O3 is highly recommended for performance.)
 
 Usage
 Amira is a UCI engine and requires a UCI-compatible chess GUI (Graphical User Interface) to be played, such as:
