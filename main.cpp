@@ -1126,12 +1126,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             // Search with reduced depth and null window
             score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
 
-            // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth
-            if (R_lmr > 0 && score > alpha) {
-                 score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_search_path_hashes);
-            }
-            // If PVS null window search still failed high, re-search with full window
-            if (score > alpha && score < beta) { // Only if it's a PV node candidate
+            // If LMR failed high (score > alpha) and a reduction was applied, re-search with full depth            
+            // If the PVS null window search (or the LMR search) failed high, a re-search with the full window is required.
+            if (score > alpha && score < beta) { 
                  score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_search_path_hashes); // Re-search with full window
             }
         }
@@ -1301,7 +1298,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 0.23\n";
+            std::cout << "id name Amira 0.24\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
