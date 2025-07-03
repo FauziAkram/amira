@@ -510,8 +510,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
-const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
+const int piece_values_mg[6] = {100, 320, 335, 500, 925, 0}; // P,N,B,R,Q,K
+const int piece_values_eg[6] = {125, 320, 335, 540, 975, 0};
 
 // Piece Square Tables (values are for white, mirrored for black)
 const int pawn_pst[64] = {
@@ -522,21 +522,21 @@ const int pawn_pst[64] = {
 };
 const int knight_pst[64] = {
     -50,-40,-30,-30,-30,-30,-40,-50, -40,-20,  0,  5,  5,  0,-20,-40,
-    -30,  5, 10, 15, 15, 10,  5,-30, -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30, -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 10, 16, 16, 10,  5,-30, -30,  0, 16, 22, 22, 16,  0,-30,
+    -30,  5, 16, 22, 22, 16,  5,-30, -30,  0, 10, 16, 16, 10,  0,-30,
     -40,-20,  0,  0,  0,  0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50
 };
 const int bishop_pst[64] = {
     -20,-10,-10,-10,-10,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10, -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10, -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  0,  5, 12, 12,  5,  0,-10, -10,  5,  5, 12, 12,  5,  5,-10,
+    -10,  0, 12, 12, 12, 12,  0,-10, -10, 10, 12, 12, 12, 12, 10,-10,
     -10,  5,  0,  0,  0,  0,  5,-10, -20,-10,-10,-10,-10,-10,-10,-20
 };
 const int rook_pst[64] = {
      0,  0,  0,  5,  5,  0,  0,  0,  -5,  0,  0,  0,  0,  0,  0, -5,
     -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
     -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-     5, 10, 10, 10, 10, 10, 10,  5,   0,  0,  0,  0,  0,  0,  0,  0
+     5, 12, 12, 12, 12, 12, 12,  5,   0,  0,  0,  0,  0,  0,  0,  0
 };
 const int queen_pst[64] = {
     -20,-10,-10, -5, -5,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
@@ -553,8 +553,8 @@ const int king_pst_mg[64] = { // King safety oriented for midgame
 };
 const int king_pst_eg[64] = { // King activity for endgame
    -50,-30,-30,-30,-30,-30,-30,-50, -30,-10, 20, 30, 30, 20,-10,-30,
-   -30, 10, 30, 40, 40, 30, 10,-30, -30, 10, 40, 50, 50, 40, 10,-30,
-   -30, 10, 40, 50, 50, 40, 10,-30, -30, 10, 30, 40, 40, 30, 10,-30,
+   -30, 10, 30, 40, 40, 30, 10,-30, -30, 10, 40, 55, 55, 40, 10,-30,
+   -30, 10, 40, 55, 55, 40, 10,-30, -30, 10, 30, 40, 40, 30, 10,-30,
    -30,-10, 20, 30, 30, 20,-10,-30, -50,-30,-30,-30,-30,-30,-30,-50
 };
 
@@ -568,16 +568,16 @@ uint64_t rank_bb_mask[8];
 uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
-const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
+const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 65, 95, 130, 0};
 
 // Evaluation Constants
-const int TEMPO_BONUS = 8;
+const int TEMPO_BONUS = 9;
 
-const int protected_pawn_bonus_mg = 8;
-const int protected_pawn_bonus_eg = 12;
+const int protected_pawn_bonus_mg = 10;
+const int protected_pawn_bonus_eg = 14;
 
-const int isolated_pawn_penalty_mg = -12;
-const int isolated_pawn_penalty_eg = -20;
+const int isolated_pawn_penalty_mg = -10;
+const int isolated_pawn_penalty_eg = -14;
 
 const int knight_mobility_bonus_mg = 1;
 const int knight_mobility_bonus_eg = 2;
@@ -741,8 +741,8 @@ int evaluate(const Position& pos) {
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
-                        if (!enemy_pawn_on_file) { mg_score += side_multiplier * 20; eg_score += side_multiplier * 15; }
-                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 5;}
+                        if (!enemy_pawn_on_file) { mg_score += side_multiplier * 22; eg_score += side_multiplier * 10; } // Open file
+                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 9;} // Semi-open file
                     }
                     // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) & attackable_squares;
@@ -770,7 +770,7 @@ int evaluate(const Position& pos) {
             }
         }
         if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
-            mg_score += side_multiplier * 30; eg_score += side_multiplier * 50;
+            mg_score += side_multiplier * 26; eg_score += side_multiplier * 52;
         }
 
         // --- King Safety and Pawn Shield ---
