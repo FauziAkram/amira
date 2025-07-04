@@ -577,7 +577,7 @@ const int protected_pawn_bonus_mg = 10;
 const int protected_pawn_bonus_eg = 14;
 
 const int isolated_pawn_penalty_mg = -10;
-const int isolated_pawn_penalty_eg = -14;
+const int isolated_pawn_penalty_eg = -15;
 
 const int knight_mobility_bonus_mg = 1;
 const int knight_mobility_bonus_eg = 2;
@@ -742,7 +742,7 @@ int evaluate(const Position& pos) {
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
                         if (!enemy_pawn_on_file) { mg_score += side_multiplier * 22; eg_score += side_multiplier * 10; } // Open file
-                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 9;} // Semi-open file
+                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 8;} // Semi-open file
                     }
                     // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) & attackable_squares;
