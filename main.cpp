@@ -1534,8 +1534,8 @@ void uci_loop() {
 
             if (time_alotment_ms != -1) {
                 use_time_limits = true;
-                double soft_limit_s = time_alotment_ms * 0.000054;
-                double hard_limit_s = time_alotment_ms * 0.0004;
+                double soft_limit_s = time_alotment_ms * 0.000052;
+                double hard_limit_s = time_alotment_ms * 0.00041;
                 soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                 hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
             } else {
