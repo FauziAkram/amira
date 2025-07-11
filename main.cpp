@@ -590,6 +590,15 @@ const int queen_mobility_bonus_eg = 2;
 
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
+const int bad_bishop_penalty_mg = -3;
+const int bad_bishop_penalty_eg = -5;
+
+// --- START: NEWLY ADDED CONSTANTS FOR KNIGHT OUTPOST ---
+const int knight_outpost_bonus_mg = 25;
+const int knight_outpost_bonus_eg = 15;
+// --- END: NEWLY ADDED CONSTANTS FOR KNIGHT OUTPOST ---
+
+
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
         file_bb_mask[f] = 0ULL;
@@ -668,7 +677,7 @@ int evaluate(const Position& pos) {
     int mg_score = 0;
     int eg_score = 0;
     int game_phase = 0;
-    
+
     // Mobility score accumulators
     int mg_mobility_score = 0;
     int eg_mobility_score = 0;
@@ -676,7 +685,7 @@ int evaluate(const Position& pos) {
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
-        
+
         // Helper bitboards for mobility and pawn structure
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t attackable_squares = ~friendly_pieces;
@@ -703,7 +712,7 @@ int evaluate(const Position& pos) {
                     bool is_isolated = true;
                     if (f > 0 && (file_bb_mask[f - 1] & all_friendly_pawns) != 0) is_isolated = false;
                     if (f < 7 && (file_bb_mask[f + 1] & all_friendly_pawns) != 0) is_isolated = false;
-                    
+
                     if (is_isolated) {
                         mg_score += side_multiplier * isolated_pawn_penalty_mg;
                         eg_score += side_multiplier * isolated_pawn_penalty_eg;
@@ -713,7 +722,7 @@ int evaluate(const Position& pos) {
                         mg_score += side_multiplier * protected_pawn_bonus_mg;
                         eg_score += side_multiplier * protected_pawn_bonus_eg;
                     }
-                    
+
                     // Passed Pawn Evaluation
                     bool is_passed = false;
                     if (current_eval_color == WHITE) {
@@ -725,7 +734,7 @@ int evaluate(const Position& pos) {
                         int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
                         mg_score += side_multiplier * passed_pawn_bonus_mg[rank_from_own_side];
                         eg_score += side_multiplier * passed_pawn_bonus_eg[rank_from_own_side];
-                        
+
                         // Passed Pawn distance to enemy king
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[1 - current_eval_color]);
                         if (enemy_king_sq != -1) {
@@ -756,11 +765,54 @@ int evaluate(const Position& pos) {
                     int mobility_count = pop_count(mobility_attacks);
                     mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
+
+                    // --- START: KNIGHT OUTPOST BONUS ---
+                    int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
+                    // An outpost must be on rank 4, 5, or 6 (indexed 3, 4, 5 from our side)
+                    if (rank_from_own_side >= 3 && rank_from_own_side <= 5) {
+                        // Must be supported by a friendly pawn
+                        bool is_supported_by_pawn = (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) != 0;
+                        if (is_supported_by_pawn) {
+                            // Must not be attackable by an enemy pawn
+                            bool is_immune_to_pawns = false;
+                            if (current_eval_color == WHITE) {
+                                if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) {
+                                    is_immune_to_pawns = true;
+                                }
+                            } else { // current_eval_color == BLACK
+                                if ((black_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) {
+                                    is_immune_to_pawns = true;
+                                }
+                            }
+                            if (is_immune_to_pawns) {
+                                mg_score += side_multiplier * knight_outpost_bonus_mg;
+                                eg_score += side_multiplier * knight_outpost_bonus_eg;
+                            }
+                        }
+                    }
+                    // --- END: KNIGHT OUTPOST BONUS ---
+
                 } else if ((Piece)p == BISHOP) {
                     uint64_t mobility_attacks = get_bishop_attacks_from_sq(sq, occupied) & attackable_squares;
                     int mobility_count = pop_count(mobility_attacks);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
+
+                    // Penalize bishop for being on the same color square as its own pawns.
+                    int bishop_sq_color = ((sq / 8) + (sq % 8)) % 2; // 0 for one color, 1 for the other
+                    int bad_pawns_count = 0;
+                    uint64_t pawns_to_check = all_friendly_pawns;
+                    while (pawns_to_check) {
+                        int pawn_sq = lsb_index(pawns_to_check);
+                        pawns_to_check &= pawns_to_check - 1;
+                        int pawn_sq_color = ((pawn_sq / 8) + (pawn_sq % 8)) % 2;
+                        if (pawn_sq_color == bishop_sq_color) {
+                            bad_pawns_count++;
+                        }
+                    }
+                    mg_score += side_multiplier * bad_pawns_count * bad_bishop_penalty_mg;
+                    eg_score += side_multiplier * bad_pawns_count * bad_bishop_penalty_eg;
+
                 } else if ((Piece)p == QUEEN) {
                     uint64_t mobility_attacks = (get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied)) & attackable_squares;
                     int mobility_count = pop_count(mobility_attacks);
