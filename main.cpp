@@ -513,36 +513,12 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
 const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
 
-// Piece Square Tables (values are for white, mirrored for black)
+// Piece Square Tables
 const int pawn_pst[64] = {
      0,  0,  0,  0,  0,  0,  0,  0,   5, 10, 10,-20,-20, 10, 10,  5,
      5, -5,-10,  0,  0,-10, -5,  5,   0,  0,  0, 20, 20,  0,  0,  0,
      5,  5, 10, 25, 25, 10,  5,  5,  10, 10, 20, 30, 30, 20, 10, 10,
     50, 50, 50, 50, 50, 50, 50, 50,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int knight_pst[64] = {
-    -50,-40,-30,-30,-30,-30,-40,-50, -40,-20,  0,  5,  5,  0,-20,-40,
-    -30,  5, 10, 15, 15, 10,  5,-30, -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30, -30,  0, 10, 15, 15, 10,  0,-30,
-    -40,-20,  0,  0,  0,  0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50
-};
-const int bishop_pst[64] = {
-    -20,-10,-10,-10,-10,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10, -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10, -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10, -20,-10,-10,-10,-10,-10,-10,-20
-};
-const int rook_pst[64] = {
-     0,  0,  0,  5,  5,  0,  0,  0,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-     5, 10, 10, 10, 10, 10, 10,  5,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int queen_pst[64] = {
-    -20,-10,-10, -5, -5,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,  -5,  0,  5,  5,  5,  5,  0, -5,
-      0,  0,  5,  5,  5,  5,  0, -5, -10,  0,  5,  5,  5,  5,  0,-10,
-    -10,  0,  0,  0,  0,  0,  0,-10, -20,-10,-10, -5, -5,-10,-10,-20
 };
 const int king_pst_mg[64] = { // King safety oriented for midgame
      20, 30, 10,  0,  0, 10, 30, 20,  // Castled king on G1/C1 gets +30 (mirrored for G8/C8)
@@ -558,8 +534,33 @@ const int king_pst_eg[64] = { // King activity for endgame
    -30,-10, 20, 30, 30, 20,-10,-30, -50,-30,-30,-30,-30,-30,-30,-50
 };
 
-const int* pst_mg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_mg};
-const int* pst_eg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_eg};
+// Knight, Bishop, Rook, Queen PSTs are mirrored (32 squares for ranks 1-4)
+const int knight_pst_mirrored[32] = {
+    -50,-40,-30,-30,-30,-30,-40,-50, // Rank 1
+    -40,-20,  0,  5,  5,  0,-20,-40, // Rank 2
+    -30,  5, 10, 15, 15, 10,  5,-30, // Rank 3
+    -30,  0, 15, 20, 20, 15,  0,-30  // Rank 4
+};
+const int bishop_pst_mirrored[32] = {
+    -20,-10,-10,-10,-10,-10,-10,-20, // Rank 1
+    -10,  0,  0,  0,  0,  0,  0,-10, // Rank 2
+    -10,  0,  5, 10, 10,  5,  0,-10, // Rank 3
+    -10,  5,  5, 10, 10,  5,  5,-10  // Rank 4
+};
+const int rook_pst_mirrored[32] = {
+     0,  0,  0,  5,  5,  0,  0,  0,  // Rank 1
+    -5,  0,  0,  0,  0,  0,  0, -5,  // Rank 2
+    -5,  0,  0,  0,  0,  0,  0, -5,  // Rank 3
+    -5,  0,  0,  0,  0,  0,  0, -5   // Rank 4
+};
+const int queen_pst_mirrored[32] = {
+    -20,-10,-10, -5, -5,-10,-10,-20, // Rank 1
+    -10,  0,  0,  0,  0,  0,  0,-10, // Rank 2
+    -10,  0,  5,  5,  5,  5,  0,-10, // Rank 3
+     -5,  0,  5,  5,  5,  5,  0, -5  // Rank 4
+};
+
+
 const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
 
 // Evaluation helper masks
@@ -692,10 +693,39 @@ int evaluate(const Position& pos) {
             while (b) {
                 int sq = lsb_index(b);
                 b &= b - 1;
-                int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
+                Piece p_type = (Piece)p;
 
-                mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
-                eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
+                int mg_pst_val = 0;
+                int eg_pst_val = 0;
+
+                if (p_type == PAWN) {
+                    int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
+                    mg_pst_val = eg_pst_val = pawn_pst[mirrored_sq];
+                } else if (p_type == KING) {
+                    int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
+                    mg_pst_val = king_pst_mg[mirrored_sq];
+                    eg_pst_val = king_pst_eg[mirrored_sq];
+                } else { // Knight, Bishop, Rook, Queen with mirrored PSTs
+                    int rank = sq / 8;
+                    int file = sq % 8;
+                    int rank_from_white_pov = (current_eval_color == WHITE) ? rank : (7 - rank);
+                    int final_rank = (rank_from_white_pov > 3) ? (7 - rank_from_white_pov) : rank_from_white_pov;
+                    int pst_idx = final_rank * 8 + file;
+                    
+                    int val = 0;
+                    switch(p_type) {
+                        case KNIGHT: val = knight_pst_mirrored[pst_idx]; break;
+                        case BISHOP: val = bishop_pst_mirrored[pst_idx]; break;
+                        case ROOK:   val = rook_pst_mirrored[pst_idx];   break;
+                        case QUEEN:  val = queen_pst_mirrored[pst_idx];  break;
+                        default: break;
+                    }
+                    mg_pst_val = eg_pst_val = val;
+                }
+
+                mg_score += side_multiplier * (piece_values_mg[p] + mg_pst_val);
+                eg_score += side_multiplier * (piece_values_eg[p] + eg_pst_val);
+
 
                 if ((Piece)p == PAWN) {
                     // Isolated and Protected Pawn Evaluation
@@ -1398,7 +1428,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.0\n";
+            std::cout << "id name Amira 1.01\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
