@@ -9,6 +9,8 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::abs
+#include <thread>   // For std::thread
+#include <atomic>   // For std::atomic
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -1000,8 +1002,8 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
 
 // --- Search ---
 std::chrono::steady_clock::time_point search_start_timepoint;
-bool stop_search_flag = false;
-uint64_t nodes_searched = 0;
+std::atomic<bool> stop_search_flag(false);
+std::atomic<uint64_t> nodes_searched(0);
 
 // Time management globals
 std::chrono::steady_clock::time_point soft_limit_timepoint;
@@ -1273,7 +1275,177 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
 // --- UCI ---
 Position uci_root_pos;
-Move uci_best_move_overall;
+std::thread search_thread;
+
+// --- Search Task for Threading ---
+struct SearchTaskInfo {
+    Position root_pos;
+    uint64_t history_hashes[256];
+    int history_len = 0;
+    int max_depth = MAX_PLY;
+    long long wtime = -1;
+    long long btime = -1;
+};
+
+void search_entry_point(SearchTaskInfo info) {
+    // This function contains the logic that was in the "go" handler's loop.
+    Position local_pos = info.root_pos;
+
+    // Copy game history to the global array used by the search function.
+    // This is safe because the main thread will join this thread before modifying game_history_hashes.
+    game_history_length = info.history_len;
+    if (info.history_len > 0) {
+        std::memcpy(game_history_hashes, info.history_hashes, info.history_len * sizeof(uint64_t));
+    }
+    
+    // Check for single legal move case
+    Move root_pseudo_moves[256];
+    int num_pseudo_moves = generate_moves(local_pos, root_pseudo_moves, false);
+    std::vector<Move> root_legal_moves;
+    for (int i = 0; i < num_pseudo_moves; ++i) {
+        const Move& m = root_pseudo_moves[i];
+        bool is_legal_flag;
+        make_move(local_pos, m, is_legal_flag);
+        if (is_legal_flag) {
+            root_legal_moves.push_back(m);
+        }
+    }
+
+    if (root_legal_moves.size() == 1) {
+        std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
+        return;
+    }
+    if (root_legal_moves.empty()) {
+        std::cout << "bestmove 0000" << std::endl;
+        return;
+    }
+
+    reset_search_state();
+    search_start_timepoint = std::chrono::steady_clock::now();
+
+    long long time_alotment_ms = (local_pos.side_to_move == WHITE) ? info.wtime : info.btime;
+
+    if (time_alotment_ms != -1) {
+        use_time_limits = true;
+        double soft_limit_s = time_alotment_ms * 0.000052;
+        double hard_limit_s = time_alotment_ms * 0.00041;
+        soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
+        hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
+    } else {
+        use_time_limits = false;
+    }
+
+    Move best_move_overall = NULL_MOVE;
+    int best_score_overall = 0;
+
+    // Aspiration Windows
+    int aspiration_alpha = -INF_SCORE;
+    int aspiration_beta = INF_SCORE;
+    int aspiration_window_delta = 25;
+
+    for (int depth = 1; depth <= info.max_depth; ++depth) {
+        int current_score;
+        if (depth <= 1) {
+            current_score = search(local_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
+        } else {
+            current_score = search(local_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
+            if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
+                aspiration_alpha = -INF_SCORE;
+                aspiration_beta = INF_SCORE;
+                current_score = search(local_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
+            }
+        }
+
+        if (stop_search_flag && depth > 1) break;
+
+        if (abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
+            aspiration_alpha = current_score - aspiration_window_delta;
+            aspiration_beta = current_score + aspiration_window_delta;
+            aspiration_window_delta += aspiration_window_delta / 3 + 5;
+            if (aspiration_window_delta > 300) aspiration_window_delta = 300;
+        } else {
+            aspiration_alpha = -INF_SCORE;
+            aspiration_beta = INF_SCORE;
+            aspiration_window_delta = 50;
+        }
+
+        Move tt_root_move = NULL_MOVE; int tt_root_score;
+        int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
+        if (probe_tt(local_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
+            if (!tt_root_move.is_null()) best_move_overall = tt_root_move;
+            best_score_overall = current_score;
+        } else {
+            best_score_overall = current_score;
+            if (tt_mask > 0) { // check that TT is initialized
+                TTEntry root_entry_check = transposition_table[local_pos.zobrist_hash & tt_mask];
+                if (root_entry_check.hash == local_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
+                    best_move_overall = root_entry_check.best_move;
+                }
+            }
+        }
+
+        auto now_tp = std::chrono::steady_clock::now();
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
+        if (elapsed_ms < 0) elapsed_ms = 0;
+
+        std::cout << "info depth " << depth << " score cp " << best_score_overall;
+        if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
+        else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2;
+        std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
+        if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched.load() * 1000 / elapsed_ms);
+
+        if (!best_move_overall.is_null()) {
+            std::cout << " pv";
+            Position temp_pos = local_pos;
+            for (int pv_idx = 0; pv_idx < depth; ++pv_idx) {
+                Move pv_m; int pv_s; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
+                if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s) && !pv_m.is_null()) {
+                    bool legal_pv;
+                    Position next_temp_pos = make_move(temp_pos, pv_m, legal_pv);
+                    if (legal_pv) {
+                        std::cout << " " << move_to_uci(pv_m);
+                        temp_pos = next_temp_pos;
+                    } else {
+                        if (pv_idx == 0) std::cout << " " << move_to_uci(best_move_overall);
+                        break;
+                    }
+                } else {
+                    if (pv_idx == 0) std::cout << " " << move_to_uci(best_move_overall);
+                    break;
+                }
+                if (stop_search_flag) break;
+            }
+        }
+        std::cout << std::endl;
+
+        if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
+            break;
+        }
+        if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
+        if (depth >= info.max_depth) break;
+    }
+
+    if (!best_move_overall.is_null()) {
+         std::cout << "bestmove " << move_to_uci(best_move_overall) << std::endl;
+    } else {
+        Move legal_moves_fallback[256];
+        int num_fallback_moves = generate_moves(local_pos, legal_moves_fallback, false);
+        bool found_one_legal_fallback = false;
+        for(int i = 0; i < num_fallback_moves; ++i) {
+            const auto& m_fall = legal_moves_fallback[i];
+            bool is_leg_fall;
+            make_move(local_pos, m_fall, is_leg_fall);
+            if(is_leg_fall) {
+                std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
+                found_one_legal_fallback = true;
+                break;
+            }
+        }
+        if (!found_one_legal_fallback) {
+             std::cout << "bestmove 0000" << std::endl;
+        }
+    }
+}
 
 void parse_fen(Position& pos, const std::string& fen_str) {
     pos = Position(); // Reset position object
@@ -1426,6 +1598,10 @@ void uci_loop() {
                 }
             }
         } else if (token == "ucinewgame") {
+            if (search_thread.joinable()) {
+                stop_search_flag = true;
+                search_thread.join();
+            }
             parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
             if (!g_tt_is_initialized) { // Ensure TT is initialized
                  init_tt(g_configured_tt_size_mb);
@@ -1434,9 +1610,12 @@ void uci_loop() {
                  clear_tt(); // Clear TT for a new game
             }
             reset_killers_and_history();
-            // Reset game history length
             game_history_length = 0;
         } else if (token == "position") {
+            if (search_thread.joinable()) {
+                stop_search_flag = true;
+                search_thread.join();
+            }
             std::string fen_str_collector;
             ss >> token;
             if (token == "startpos") {
@@ -1472,15 +1651,13 @@ void uci_loop() {
                     if (m.is_null() && move_str_uci != "0000") { /* Invalid move string */ break; }
                     if (m.is_null() && move_str_uci == "0000") { /* UCI nullmove, usually indicates error or end */ break; }
 
-                    // Add current hash to history BEFORE making the move
-                    if (game_history_length < 256) { // Safety check
+                    if (game_history_length < 256) {
                         game_history_hashes[game_history_length++] = uci_root_pos.zobrist_hash;
                     }
-                    // Check for irreversible move (pawn move or capture)
                     Piece moved_piece = uci_root_pos.piece_on_sq(m.from);
                     Piece captured_piece = uci_root_pos.piece_on_sq(m.to);
                     if (moved_piece == PAWN || captured_piece != NO_PIECE) {
-                        game_history_length = 0; // Reset history
+                        game_history_length = 0;
                     }
 
                     bool legal;
@@ -1489,172 +1666,40 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
+            if (search_thread.joinable()) {
+                stop_search_flag = true;
+                search_thread.join();
+            }
             if (!g_tt_is_initialized) { // Failsafe
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
 
-            // Check for single legal move case
-            Move root_pseudo_moves[256];
-            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
-            std::vector<Move> root_legal_moves;
-            for (int i = 0; i < num_pseudo_moves; ++i) {
-                const Move& m = root_pseudo_moves[i];
-                bool is_legal_flag;
-                make_move(uci_root_pos, m, is_legal_flag); // This call checks legality
-                if (is_legal_flag) {
-                    root_legal_moves.push_back(m);
-                }
+            SearchTaskInfo info;
+            info.root_pos = uci_root_pos;
+            info.history_len = game_history_length;
+            if (game_history_length > 0) {
+                 std::memcpy(info.history_hashes, game_history_hashes, game_history_length * sizeof(uint64_t));
             }
-
-            // If there's only one legal move, play it immediately.
-            if (root_legal_moves.size() == 1) {
-                std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
-                continue; 
-            }
-            if (root_legal_moves.empty()) {
-                std::cout << "bestmove 0000" << std::endl;
-                continue;
-            }
-
-            long long wtime = -1, btime = -1;
-            int max_depth_to_search = MAX_PLY; // Default to effectively infinite depth
 
             std::string go_param;
             while(ss >> go_param) {
-                if (go_param == "wtime") ss >> wtime;
-                else if (go_param == "btime") ss >> btime;
-                else if (go_param == "depth") ss >> max_depth_to_search;
+                if (go_param == "wtime") ss >> info.wtime;
+                else if (go_param == "btime") ss >> info.btime;
+                else if (go_param == "depth") ss >> info.max_depth;
             }
 
-            reset_search_state(); 
-            search_start_timepoint = std::chrono::steady_clock::now();
+            stop_search_flag = false;
+            search_thread = std::thread(search_entry_point, info);
 
-            long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
-
-            if (time_alotment_ms != -1) {
-                use_time_limits = true;
-                double soft_limit_s = time_alotment_ms * 0.000052;
-                double hard_limit_s = time_alotment_ms * 0.00041;
-                soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
-                hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
-            } else {
-                use_time_limits = false;
-            }
-
-            uci_best_move_overall = NULL_MOVE;
-            int best_score_overall = 0;
-
-            // Aspiration Windows
-            int aspiration_alpha = -INF_SCORE;
-            int aspiration_beta = INF_SCORE;
-            int aspiration_window_delta = 25;
-
-            for (int depth = 1; depth <= max_depth_to_search; ++depth) {
-                int current_score;
-                // Removed path hash vector from search calls
-                if (depth <= 1) { 
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
-                } else {
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
-                    if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
-                        aspiration_alpha = -INF_SCORE; 
-                        aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
-                    }
-                }
-
-                if (stop_search_flag && depth > 1) break;
-
-                if (abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
-                    aspiration_alpha = current_score - aspiration_window_delta;
-                    aspiration_beta = current_score + aspiration_window_delta;
-                    aspiration_window_delta += aspiration_window_delta / 3 + 5;
-                    if (aspiration_window_delta > 300) aspiration_window_delta = 300;
-                } else {
-                    aspiration_alpha = -INF_SCORE;
-                    aspiration_beta = INF_SCORE;
-                    aspiration_window_delta = 50;
-                }
-
-                Move tt_root_move = NULL_MOVE; int tt_root_score;
-                int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
-                if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
-                     if (!tt_root_move.is_null()) uci_best_move_overall = tt_root_move;
-                     best_score_overall = current_score;
-                } else {
-                     best_score_overall = current_score;
-                     TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
-                     if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
-                         uci_best_move_overall = root_entry_check.best_move;
-                     }
-                }
-
-                auto now_tp = std::chrono::steady_clock::now();
-                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
-                if (elapsed_ms < 0) elapsed_ms = 0;
-
-                std::cout << "info depth " << depth << " score cp " << best_score_overall;
-                if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
-                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2;
-                std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
-                if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
-
-                if (!uci_best_move_overall.is_null()) {
-                    std::cout << " pv";
-                    Position temp_pos = uci_root_pos;
-                    for (int pv_idx = 0; pv_idx < depth; ++pv_idx) {
-                        Move pv_m; int pv_s; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
-                        if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s) && !pv_m.is_null()) {
-                            bool legal_pv;
-                            Position next_temp_pos = make_move(temp_pos, pv_m, legal_pv);
-                            if (legal_pv) {
-                                std::cout << " " << move_to_uci(pv_m);
-                                temp_pos = next_temp_pos;
-                            } else { 
-                                if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
-                                break;
-                            }
-                        } else { 
-                            if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
-                            break;
-                        }
-                        if (stop_search_flag) break;
-                    }
-                }
-                std::cout << std::endl;
-
-                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
-                    break;
-                }
-                if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
-                if (depth >= max_depth_to_search) break;
-            }
-
-            if (!uci_best_move_overall.is_null()) {
-                 std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
-            } else {
-                Move legal_moves_fallback[256];
-                int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
-                bool found_one_legal_fallback = false;
-                for(int i = 0; i < num_fallback_moves; ++i) {
-                    const auto& m_fall = legal_moves_fallback[i];
-                    bool is_leg_fall;
-                    make_move(uci_root_pos, m_fall, is_leg_fall);
-                    if(is_leg_fall) {
-                        std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
-                        found_one_legal_fallback = true;
-                        break;
-                    }
-                }
-                if (!found_one_legal_fallback) {
-                     std::cout << "bestmove 0000\n" << std::flush;
-                }
-            }
-
-        } else if (token == "quit" || token == "stop") {
+        } else if (token == "stop") {
             stop_search_flag = true;
-            if (token == "quit") break;
+        } else if (token == "quit") {
+            stop_search_flag = true;
+            if (search_thread.joinable()) {
+                search_thread.join();
+            }
+            break;
         }
     }
 }
@@ -1669,5 +1714,11 @@ int main(int argc, char* argv[]) {
     reset_killers_and_history();
 
     uci_loop();
+
+    // Ensure the search thread is joined before exiting main
+    if (search_thread.joinable()) {
+        search_thread.join();
+    }
+    
     return 0;
 }
