@@ -1652,6 +1652,9 @@ void uci_loop() {
                 }
             }
 
+            // Reset the stop flag after the search is complete to ensure clean state.
+            stop_search_flag = false;
+
         } else if (token == "quit" || token == "stop") {
             stop_search_flag = true;
             if (token == "quit") break;
