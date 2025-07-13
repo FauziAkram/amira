@@ -580,10 +580,10 @@ const int protected_pawn_bonus_eg = 12;
 
 const int isolated_pawn_penalty_mg = -12;
 const int isolated_pawn_penalty_eg = -20;
-const int doubled_pawn_liability_mg = -10;
-const int doubled_pawn_liability_eg = -15;
-const int hindered_pawn_penalty_mg = -8;
-const int hindered_pawn_penalty_eg = -12;
+const int doubled_pawn_liability_mg = -12;
+const int doubled_pawn_liability_eg = -45;
+const int hindered_pawn_penalty_mg = -7;
+const int hindered_pawn_penalty_eg = -18;
 
 const int knight_mobility_bonus_mg = 1;
 const int knight_mobility_bonus_eg = 2;
@@ -594,16 +594,16 @@ const int rook_mobility_bonus_eg = 4;
 const int queen_mobility_bonus_mg = 1;
 const int queen_mobility_bonus_eg = 2;
 
-const int dominant_knight_bonus_mg = 25;
-const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 20;
-const int dominant_bishop_bonus_eg = 15;
-const int potential_dominance_bonus = 5;
+const int dominant_knight_bonus_mg = 45;
+const int dominant_knight_bonus_eg = 30;
+const int dominant_bishop_bonus_mg = 28;
+const int dominant_bishop_bonus_eg = 22;
+const int potential_knight_outpost_bonus = 15;
 
-const int minor_on_heavy_pressure_mg = 20;
-const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 15;
-const int rook_on_minor_pressure_eg = 10;
+const int minor_on_heavy_pressure_mg = 40;
+const int minor_on_heavy_pressure_eg = 35;
+const int rook_on_minor_pressure_mg = 25;
+const int rook_on_minor_pressure_eg = 30;
 
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
@@ -746,8 +746,8 @@ int evaluate(const Position& pos) {
                     }
                     
                     // Doubled Pawn Evaluation
-                    uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
-                    if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
+                    uint64_t behind_sq_bb = (current_eval_color == WHITE) ? south(set_bit(sq)) : north(set_bit(sq));
+                    if ((file_bb_mask[f] & behind_sq_bb & all_friendly_pawns) != 0) {
                          mg_score += side_multiplier * doubled_pawn_liability_mg;
                          eg_score += side_multiplier * doubled_pawn_liability_eg;
                     }
@@ -811,7 +811,7 @@ int evaluate(const Position& pos) {
                     // Knight Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                    if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
+                    if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6 for White
                         if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
                              if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
                                 mg_score += side_multiplier * dominant_knight_bonus_mg;
@@ -819,7 +819,8 @@ int evaluate(const Position& pos) {
                             }
                         }
                     }
-                    // Potential Outpost
+                    
+                    // Potential Knight Outpost Bonus
                     uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
                     while(potential_outpost_moves) {
                         int to_sq = lsb_index(potential_outpost_moves);
@@ -828,7 +829,7 @@ int evaluate(const Position& pos) {
                         int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
                         if(to_relative_rank >= 3 && to_relative_rank <=5) {
                             if(get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
-                                mg_score += side_multiplier * potential_dominance_bonus;
+                                mg_score += side_multiplier * potential_knight_outpost_bonus;
                                 break; // Only count once per piece
                             }
                         }
@@ -843,7 +844,7 @@ int evaluate(const Position& pos) {
                     // Bishop Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
+                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6 for White
                         if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
                              if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
                                 mg_score += side_multiplier * dominant_bishop_bonus_mg;
@@ -872,15 +873,17 @@ int evaluate(const Position& pos) {
 
         // Minor pieces attacking heavy pieces
         uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
-        if (pop_count(minor_attacks & enemy_rooks_and_queens) > 0) {
-            mg_score += side_multiplier * minor_on_heavy_pressure_mg * pop_count(minor_attacks & enemy_rooks_and_queens);
-            eg_score += side_multiplier * minor_on_heavy_pressure_eg * pop_count(minor_attacks & enemy_rooks_and_queens);
+        int minor_on_heavy_count = pop_count(minor_attacks & enemy_rooks_and_queens);
+        if (minor_on_heavy_count > 0) {
+            mg_score += side_multiplier * minor_on_heavy_pressure_mg * minor_on_heavy_count;
+            eg_score += side_multiplier * minor_on_heavy_pressure_eg * minor_on_heavy_count;
         }
 
         // Rooks attacking minor pieces
-        if (pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops) > 0) {
-             mg_score += side_multiplier * rook_on_minor_pressure_mg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
-             eg_score += side_multiplier * rook_on_minor_pressure_eg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
+        int rook_on_minor_count = pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
+        if (rook_on_minor_count > 0) {
+             mg_score += side_multiplier * rook_on_minor_pressure_mg * rook_on_minor_count;
+             eg_score += side_multiplier * rook_on_minor_pressure_eg * rook_on_minor_count;
         }
 
         // --- King Safety and Pawn Shield ---
@@ -957,7 +960,6 @@ int evaluate(const Position& pos) {
                 }
             }
             mg_score += side_multiplier * pawn_shield_score;
-            // eg_score += side_multiplier * (pawn_shield_score / 3); // Less emphasis in EG for shield
 
             // KING SAFETY (ATTACKS ON KING'S IMMEDIATE VICINITY)
             int king_attack_score = 0; // Aggregated score of attacks
