@@ -573,16 +573,16 @@ const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by r
 const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
 
 // Evaluation Constants
-const int TEMPO_BONUS = 8;
+const int TEMPO_BONUS = 7;
 
 const int protected_pawn_bonus_mg = 8;
 const int protected_pawn_bonus_eg = 12;
 
-const int isolated_pawn_penalty_mg = -12;
+const int isolated_pawn_penalty_mg = -11;
 const int isolated_pawn_penalty_eg = -20;
 const int doubled_pawn_liability_mg = -10;
 const int doubled_pawn_liability_eg = -15;
-const int hindered_pawn_penalty_mg = -8;
+const int hindered_pawn_penalty_mg = -9;
 const int hindered_pawn_penalty_eg = -12;
 
 const int knight_mobility_bonus_mg = 1;
@@ -592,17 +592,17 @@ const int bishop_mobility_bonus_eg = 3;
 const int rook_mobility_bonus_mg = 2;
 const int rook_mobility_bonus_eg = 4;
 const int queen_mobility_bonus_mg = 1;
-const int queen_mobility_bonus_eg = 2;
+const int queen_mobility_bonus_eg = 3;
 
 const int dominant_knight_bonus_mg = 25;
-const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 20;
+const int dominant_knight_bonus_eg = 16;
+const int dominant_bishop_bonus_mg = 19;
 const int dominant_bishop_bonus_eg = 15;
 const int potential_dominance_bonus = 5;
 
 const int minor_on_heavy_pressure_mg = 20;
 const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 15;
+const int rook_on_minor_pressure_mg = 14;
 const int rook_on_minor_pressure_eg = 10;
 
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
@@ -892,7 +892,7 @@ int evaluate(const Position& pos) {
             // PAWN SHIELD
             int pawn_shield_score = 0;
             const int shield_pawn_bonus = 12;
-            const int missing_shield_pawn_penalty = -18;
+            const int missing_shield_pawn_penalty = -19;
             const int open_file_penalty_adj = -10; // Additional for open file on missing shield
 
             int shield_candidate_sqs[3] = {-1, -1, -1};
