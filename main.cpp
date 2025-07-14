@@ -53,73 +53,73 @@ struct TunableParam {
 // --- NEW --- Centralized namespace for all tunable evaluation parameters
 namespace EvalParams {
     // Material Values (Pawn is fixed at 100)
-    TunableParam KnightValueMG("KnightValueMG", 320, 250, 400);
-    TunableParam BishopValueMG("BishopValueMG", 330, 250, 420);
-    TunableParam RookValueMG("RookValueMG",   500, 400, 600);
-    TunableParam QueenValueMG("QueenValueMG",  900, 800, 1100);
+    TunableParam KnightValueMG("KnightValueMG", 320, 0, 1280);
+    TunableParam BishopValueMG("BishopValueMG", 330, 0, 1320);
+    TunableParam RookValueMG("RookValueMG",   500, 0, 2000);
+    TunableParam QueenValueMG("QueenValueMG",  900, 0, 3600);
 
-    TunableParam KnightValueEG("KnightValueEG", 320, 250, 400);
-    TunableParam BishopValueEG("BishopValueEG", 330, 250, 420);
-    TunableParam RookValueEG("RookValueEG",   530, 430, 630);
-    TunableParam QueenValueEG("QueenValueEG",  950, 850, 1150);
+    TunableParam KnightValueEG("KnightValueEG", 320, 0, 1280);
+    TunableParam BishopValueEG("BishopValueEG", 330, 0, 1320);
+    TunableParam RookValueEG("RookValueEG",   530, 0, 2120);
+    TunableParam QueenValueEG("QueenValueEG",  950, 0, 3800);
 
     // Pawn Structure
-    TunableParam IsolatedPawnPenaltyMG("IsolatedPawnPenaltyMG", -12, -30, 0);
-    TunableParam IsolatedPawnPenaltyEG("IsolatedPawnPenaltyEG", -20, -40, 0);
-    TunableParam ProtectedPawnBonusMG("ProtectedPawnBonusMG", 8, 0, 25);
-    TunableParam ProtectedPawnBonusEG("ProtectedPawnBonusEG", 12, 0, 30);
-    TunableParam DoubledPawnPenaltyMG("DoubledPawnPenaltyMG", -10, -30, 0);
-    TunableParam DoubledPawnPenaltyEG("DoubledPawnPenaltyEG", -15, -40, 0);
-    TunableParam HinderedPawnPenaltyMG("HinderedPawnPenaltyMG", -8, -25, 0);
-    TunableParam HinderedPawnPenaltyEG("HinderedPawnPenaltyEG", -12, -30, 0);
+    TunableParam IsolatedPawnPenaltyMG("IsolatedPawnPenaltyMG", -12, -48, 0);
+    TunableParam IsolatedPawnPenaltyEG("IsolatedPawnPenaltyEG", -20, -80, 0);
+    TunableParam ProtectedPawnBonusMG("ProtectedPawnBonusMG", 8, 0, 32);
+    TunableParam ProtectedPawnBonusEG("ProtectedPawnBonusEG", 12, 0, 48);
+    TunableParam DoubledPawnPenaltyMG("DoubledPawnPenaltyMG", -10, -40, 0);
+    TunableParam DoubledPawnPenaltyEG("DoubledPawnPenaltyEG", -15, -60, 0);
+    TunableParam HinderedPawnPenaltyMG("HinderedPawnPenaltyMG", -8, -32, 0);
+    TunableParam HinderedPawnPenaltyEG("HinderedPawnPenaltyEG", -12, -48, 0);
 
     // Passed Pawns (as scaling factors, default = 100)
-    TunableParam PassedPawnScaleMG("PassedPawnScaleMG", 100, 50, 200);
-    TunableParam PassedPawnScaleEG("PassedPawnScaleEG", 100, 50, 200);
-    TunableParam PassedPawnKingDistEG("PassedPawnKingDistEG", 4, 0, 10);
+    TunableParam PassedPawnScaleMG("PassedPawnScaleMG", 100, 0, 400);
+    TunableParam PassedPawnScaleEG("PassedPawnScaleEG", 100, 0, 400);
+    TunableParam PassedPawnKingDistEG("PassedPawnKingDistEG", 4, 0, 16);
 
     // Mobility (per square of mobility)
     TunableParam KnightMobilityMG("KnightMobilityMG", 1, 0, 5);
-    TunableParam KnightMobilityEG("KnightMobilityEG", 2, 0, 6);
-    TunableParam BishopMobilityMG("BishopMobilityMG", 2, 0, 6);
-    TunableParam BishopMobilityEG("BishopMobilityEG", 3, 0, 8);
-    TunableParam RookMobilityMG("RookMobilityMG", 2, 0, 6);
-    TunableParam RookMobilityEG("RookMobilityEG", 4, 0, 10);
+    TunableParam KnightMobilityEG("KnightMobilityEG", 2, 0, 8);
+    TunableParam BishopMobilityMG("BishopMobilityMG", 2, 0, 8);
+    TunableParam BishopMobilityEG("BishopMobilityEG", 3, 0, 12);
+    TunableParam RookMobilityMG("RookMobilityMG", 2, 0, 8);
+    TunableParam RookMobilityEG("RookMobilityEG", 4, 0, 16);
     TunableParam QueenMobilityMG("QueenMobilityMG", 1, 0, 5);
-    TunableParam QueenMobilityEG("QueenMobilityEG", 2, 0, 6);
+    TunableParam QueenMobilityEG("QueenMobilityEG", 2, 0, 8);
 
     // Piece Bonuses
-    TunableParam BishopPairMG("BishopPairMG", 30, 0, 70);
-    TunableParam BishopPairEG("BishopPairEG", 50, 10, 100);
-    TunableParam KnightOutpostMG("KnightOutpostMG", 25, 0, 60);
-    TunableParam KnightOutpostEG("KnightOutpostEG", 15, 0, 50);
-    TunableParam BishopOutpostMG("BishopOutpostMG", 20, 0, 60);
-    TunableParam BishopOutpostEG("BishopOutpostEG", 15, 0, 50);
-    TunableParam PotentialOutpostBonus("PotentialOutpostBonus", 5, 0, 15);
+    TunableParam BishopPairMG("BishopPairMG", 30, 0, 120);
+    TunableParam BishopPairEG("BishopPairEG", 50, 0, 200);
+    TunableParam KnightOutpostMG("KnightOutpostMG", 25, 0, 100);
+    TunableParam KnightOutpostEG("KnightOutpostEG", 15, 0, 60);
+    TunableParam BishopOutpostMG("BishopOutpostMG", 20, 0, 80);
+    TunableParam BishopOutpostEG("BishopOutpostEG", 15, 0, 60);
+    TunableParam PotentialOutpostBonus("PotentialOutpostBonus", 5, 0, 20);
 
     // Rook Placement
-    TunableParam RookOpenFileMG("RookOpenFileMG", 20, 0, 50);
-    TunableParam RookOpenFileEG("RookOpenFileEG", 15, 0, 40);
-    TunableParam RookSemiOpenFileMG("RookSemiOpenFileMG", 10, 0, 30);
-    TunableParam RookSemiOpenFileEG("RookSemiOpenFileEG", 5, 0, 25);
+    TunableParam RookOpenFileMG("RookOpenFileMG", 20, 0, 80);
+    TunableParam RookOpenFileEG("RookOpenFileEG", 15, 0, 60);
+    TunableParam RookSemiOpenFileMG("RookSemiOpenFileMG", 10, 0, 40);
+    TunableParam RookSemiOpenFileEG("RookSemiOpenFileEG", 5, 0, 20);
 
     // Threats and Pressure
-    TunableParam MinorOnHeavyPressureMG("MinorOnHeavyPressureMG", 20, 0, 50);
-    TunableParam MinorOnHeavyPressureEG("MinorOnHeavyPressureEG", 15, 0, 40);
-    TunableParam RookOnMinorPressureMG("RookOnMinorPressureMG", 15, 0, 40);
-    TunableParam RookOnMinorPressureEG("RookOnMinorPressureEG", 10, 0, 30);
+    TunableParam MinorOnHeavyPressureMG("MinorOnHeavyPressureMG", 20, 0, 80);
+    TunableParam MinorOnHeavyPressureEG("MinorOnHeavyPressureEG", 15, 0, 60);
+    TunableParam RookOnMinorPressureMG("RookOnMinorPressureMG", 15, 0, 60);
+    TunableParam RookOnMinorPressureEG("RookOnMinorPressureEG", 10, 0, 40);
 
     // King Safety (as scaling factors, default = 100)
-    TunableParam KingDangerScaleMG("KingDangerScaleMG", 100, 50, 200);
-    TunableParam KingDangerScaleEG("KingDangerScaleEG", 100, 50, 200);
+    TunableParam KingDangerScaleMG("KingDangerScaleMG", 100, 0, 400);
+    TunableParam KingDangerScaleEG("KingDangerScaleEG", 100, 0, 400);
 
     // Pawn Shield
-    TunableParam PawnShieldBonus("PawnShieldBonus", 12, 0, 30);
-    TunableParam PawnShieldPenalty("PawnShieldPenalty", -18, -40, 0);
-    TunableParam PawnShieldOpenFilePenalty("PawnShieldOpenFilePenalty", -10, -30, 0);
+    TunableParam PawnShieldBonus("PawnShieldBonus", 12, 0, 48);
+    TunableParam PawnShieldPenalty("PawnShieldPenalty", -18, -72, 0);
+    TunableParam PawnShieldOpenFilePenalty("PawnShieldOpenFilePenalty", -10, -40, 0);
 
     // General
-    TunableParam TempoBonus("TempoBonus", 8, 0, 25);
+    TunableParam TempoBonus("TempoBonus", 8, 0, 32);
 
     // Map to hold all parameters for easy access by UCI
     std::map<std::string, TunableParam*> AllParams;
