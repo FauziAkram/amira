@@ -4,13 +4,13 @@
 #include <sstream>
 #include <chrono>
 #include <algorithm>
-#include <cstring> // For std::memset
+#include <cstring>
 #include <cstdint>
-#include <random>   // For std::mt19937_64
-#include <cctype>   // For std::isdigit, std::islower, std::tolower
-#include <cmath>    // For std::abs
+#include <random>
+#include <cctype>
+#include <cmath>
+#include <map>
 
-// Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
@@ -32,16 +32,158 @@ constexpr uint8_t WQ_CASTLE_MASK = 2;
 constexpr uint8_t BK_CASTLE_MASK = 4;
 constexpr uint8_t BQ_CASTLE_MASK = 8;
 
-// Rook and King starting squares (standard chess)
+// Rook and King starting squares
 constexpr int A1_SQ = 0; constexpr int E1_SQ = 4; constexpr int H1_SQ = 7;
-constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
+constexpr int G1_SQ = 6; constexpr int C1_SQ = 2;
 constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
-constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
+constexpr int G8_SQ = 62; constexpr int C8_SQ = 58;
 
-// King safety penalty tables (index is king_attack_score, capped)
-const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
-const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
+// --- Parameter Management Structure ---
+struct TunableParam {
+    std::string name;
+    int value;
+    int default_val;
+    int min_val;
+    int max_val;
 
+    TunableParam(std::string n, int def, int min, int max)
+        : name(n), value(def), default_val(def), min_val(min), max_val(max) {}
+};
+
+// --- Centralized namespace for all tunable parameters ---
+namespace EvalParams {
+    // Material Values
+    TunableParam KnightValueMG("KnightValueMG", 320, 250, 400), BishopValueMG("BishopValueMG", 330, 250, 420);
+    TunableParam RookValueMG("RookValueMG", 500, 400, 600), QueenValueMG("QueenValueMG", 900, 800, 1100);
+    TunableParam KnightValueEG("KnightValueEG", 320, 250, 400), BishopValueEG("BishopValueEG", 330, 250, 420);
+    TunableParam RookValueEG("RookValueEG", 530, 430, 630), QueenValueEG("QueenValueEG", 950, 850, 1150);
+
+    // Pawn Structure
+    TunableParam IsolatedPawnPenaltyMG("IsolatedPawnPenaltyMG",-12,-30,0), IsolatedPawnPenaltyEG("IsolatedPawnPenaltyEG",-20,-40,0);
+    TunableParam ProtectedPawnBonusMG("ProtectedPawnBonusMG",8,0,25), ProtectedPawnBonusEG("ProtectedPawnBonusEG",12,0,30);
+    TunableParam DoubledPawnPenaltyMG("DoubledPawnPenaltyMG",-10,-30,0), DoubledPawnPenaltyEG("DoubledPawnPenaltyEG",-15,-40,0);
+    TunableParam HinderedPawnPenaltyMG("HinderedPawnPenaltyMG",-8,-25,0), HinderedPawnPenaltyEG("HinderedPawnPenaltyEG",-12,-30,0);
+
+    // Piece Bonuses
+    TunableParam BishopPairMG("BishopPairMG",30,0,70), BishopPairEG("BishopPairEG",50,10,100);
+    TunableParam KnightOutpostMG("KnightOutpostMG",25,0,60), KnightOutpostEG("KnightOutpostEG",15,0,50);
+    TunableParam BishopOutpostMG("BishopOutpostMG",20,0,60), BishopOutpostEG("BishopOutpostEG",15,0,50);
+    TunableParam PotentialOutpostBonus("PotentialOutpostBonus",5,0,15);
+
+    // Rook Placement
+    TunableParam RookOpenFileMG("RookOpenFileMG",20,0,50), RookOpenFileEG("RookOpenFileEG",15,0,40);
+    TunableParam RookSemiOpenFileMG("RookSemiOpenFileMG",10,0,30), RookSemiOpenFileEG("RookSemiOpenFileEG",5,0,25);
+
+    // Threats and Pressure
+    TunableParam MinorOnHeavyPressureMG("MinorOnHeavyPressureMG",20,0,50), MinorOnHeavyPressureEG("MinorOnHeavyPressureEG",15,0,40);
+    TunableParam RookOnMinorPressureMG("RookOnMinorPressureMG",15,0,40), RookOnMinorPressureEG("RookOnMinorPressureEG",10,0,30);
+    
+    // Pawn Shield
+    TunableParam PawnShieldBonus("PawnShieldBonus",12,0,30), PawnShieldPenalty("PawnShieldPenalty",-18,-40,0);
+    TunableParam PawnShieldOpenFilePenalty("PawnShieldOpenFilePenalty",-10,-30,0);
+
+    // General Eval
+    TunableParam TempoBonus("TempoBonus",8,0,25);
+
+    // --- NEWLY UNLOCKED PARAMETERS ---
+
+    // Passed Pawn Bonus arrays (8 values each for MG and EG)
+    TunableParam PassedPawnMG0("PassedPawnMG0",0,-10,20), PassedPawnMG1("PassedPawnMG1",5,0,30), PassedPawnMG2("PassedPawnMG2",15,5,50);
+    TunableParam PassedPawnMG3("PassedPawnMG3",25,10,70), PassedPawnMG4("PassedPawnMG4",40,20,100), PassedPawnMG5("PassedPawnMG5",60,30,150);
+    TunableParam PassedPawnMG6("PassedPawnMG6",80,40,200), PassedPawnMG7("PassedPawnMG7",0,-10,20);
+    TunableParam PassedPawnEG0("PassedPawnEG0",0,-10,30), PassedPawnEG1("PassedPawnEG1",10,0,40), PassedPawnEG2("PassedPawnEG2",25,10,60);
+    TunableParam PassedPawnEG3("PassedPawnEG3",40,20,100), PassedPawnEG4("PassedPawnEG4",60,30,150), PassedPawnEG5("PassedPawnEG5",90,50,200);
+    TunableParam PassedPawnEG6("PassedPawnEG6",120,70,250), PassedPawnEG7("PassedPawnEG7",0,-10,30);
+    TunableParam PassedPawnKingDistEG("PassedPawnKingDistEG", 4, 0, 10);
+
+    // King Danger Penalty arrays (15 values each for MG and EG)
+    TunableParam KingDangerMG0("KingDangerMG0",0,-10,10), KingDangerMG1("KingDangerMG1",0,-10,20), KingDangerMG2("KingDangerMG2",5,0,30);
+    TunableParam KingDangerMG3("KingDangerMG3",15,5,50), KingDangerMG4("KingDangerMG4",30,10,80), KingDangerMG5("KingDangerMG5",50,20,120);
+    TunableParam KingDangerMG6("KingDangerMG6",75,40,160), KingDangerMG7("KingDangerMG7",100,60,200), KingDangerMG8("KingDangerMG8",130,80,250);
+    TunableParam KingDangerMG9("KingDangerMG9",160,100,300), KingDangerMG10("KingDangerMG10",200,130,350), KingDangerMG11("KingDangerMG11",240,160,400);
+    TunableParam KingDangerMG12("KingDangerMG12",280,190,450), KingDangerMG13("KingDangerMG13",320,220,500), KingDangerMG14("KingDangerMG14",350,250,550);
+
+    TunableParam KingDangerEG0("KingDangerEG0",0,-10,10), KingDangerEG1("KingDangerEG1",0,-10,20), KingDangerEG2("KingDangerEG2",0,0,30);
+    TunableParam KingDangerEG3("KingDangerEG3",5,0,40), KingDangerEG4("KingDangerEG4",10,0,50), KingDangerEG5("KingDangerEG5",15,0,60);
+    TunableParam KingDangerEG6("KingDangerEG6",20,5,70), KingDangerEG7("KingDangerEG7",30,10,80), KingDangerEG8("KingDangerEG8",40,15,100);
+    TunableParam KingDangerEG9("KingDangerEG9",50,20,120), KingDangerEG10("KingDangerEG10",60,25,140), KingDangerEG11("KingDangerEG11",70,30,160);
+    TunableParam KingDangerEG12("KingDangerEG12",80,35,180), KingDangerEG13("KingDangerEG13",90,40,200), KingDangerEG14("KingDangerEG14",100,45,220);
+
+    // --- Search Parameters ---
+    
+    // MVV-LVA values for move ordering
+    TunableParam MvvLvaPawn("MvvLvaPawn",100,80,150), MvvLvaKnight("MvvLvaKnight",320,250,400), MvvLvaBishop("MvvLvaBishop",330,250,420);
+    TunableParam MvvLvaRook("MvvLvaRook",500,400,600), MvvLvaQueen("MvvLvaQueen",900,800,1100), MvvLvaKing("MvvLvaKing",10000,9000,11000);
+
+    // Razoring margins
+    TunableParam RazoringMarginBase("RazoringMarginBase",250,150,400), RazoringMarginPerDepth("RazoringMarginPerDepth",80,40,150);
+
+    // Map to hold all parameters for easy access by UCI
+    std::map<std::string, TunableParam*> AllParams;
+
+    // Pointer arrays for fast access in eval/search
+    TunableParam* PassedPawnMG[8];
+    TunableParam* PassedPawnEG[8];
+    TunableParam* KingDangerMG[15];
+    TunableParam* KingDangerEG[15];
+    TunableParam* MvvLva[6];
+}
+
+// Function to populate the parameter map and pointer arrays
+void init_parameters() {
+    using namespace EvalParams;
+    // Standard params
+    AllParams[KnightValueMG.name] = &KnightValueMG; AllParams[BishopValueMG.name] = &BishopValueMG;
+    AllParams[RookValueMG.name] = &RookValueMG; AllParams[QueenValueMG.name] = &QueenValueMG;
+    AllParams[KnightValueEG.name] = &KnightValueEG; AllParams[BishopValueEG.name] = &BishopValueEG;
+    AllParams[RookValueEG.name] = &RookValueEG; AllParams[QueenValueEG.name] = &QueenValueEG;
+    AllParams[IsolatedPawnPenaltyMG.name] = &IsolatedPawnPenaltyMG; AllParams[IsolatedPawnPenaltyEG.name] = &IsolatedPawnPenaltyEG;
+    AllParams[ProtectedPawnBonusMG.name] = &ProtectedPawnBonusMG; AllParams[ProtectedPawnBonusEG.name] = &ProtectedPawnBonusEG;
+    AllParams[DoubledPawnPenaltyMG.name] = &DoubledPawnPenaltyMG; AllParams[DoubledPawnPenaltyEG.name] = &DoubledPawnPenaltyEG;
+    AllParams[HinderedPawnPenaltyMG.name] = &HinderedPawnPenaltyMG; AllParams[HinderedPawnPenaltyEG.name] = &HinderedPawnPenaltyEG;
+    AllParams[PassedPawnKingDistEG.name] = &PassedPawnKingDistEG;
+    AllParams[BishopPairMG.name] = &BishopPairMG; AllParams[BishopPairEG.name] = &BishopPairEG;
+    AllParams[KnightOutpostMG.name] = &KnightOutpostMG; AllParams[KnightOutpostEG.name] = &KnightOutpostEG;
+    AllParams[BishopOutpostMG.name] = &BishopOutpostMG; AllParams[BishopOutpostEG.name] = &BishopOutpostEG;
+    AllParams[PotentialOutpostBonus.name] = &PotentialOutpostBonus;
+    AllParams[RookOpenFileMG.name] = &RookOpenFileMG; AllParams[RookOpenFileEG.name] = &RookOpenFileEG;
+    AllParams[RookSemiOpenFileMG.name] = &RookSemiOpenFileMG; AllParams[RookSemiOpenFileEG.name] = &RookSemiOpenFileEG;
+    AllParams[MinorOnHeavyPressureMG.name] = &MinorOnHeavyPressureMG; AllParams[MinorOnHeavyPressureEG.name] = &MinorOnHeavyPressureEG;
+    AllParams[RookOnMinorPressureMG.name] = &RookOnMinorPressureMG; AllParams[RookOnMinorPressureEG.name] = &RookOnMinorPressureEG;
+    AllParams[PawnShieldBonus.name] = &PawnShieldBonus; AllParams[PawnShieldPenalty.name] = &PawnShieldPenalty;
+    AllParams[PawnShieldOpenFilePenalty.name] = &PawnShieldOpenFilePenalty;
+    AllParams[TempoBonus.name] = &TempoBonus;
+    // Search params
+    AllParams[MvvLvaPawn.name] = &MvvLvaPawn; AllParams[MvvLvaKnight.name] = &MvvLvaKnight; AllParams[MvvLvaBishop.name] = &MvvLvaBishop;
+    AllParams[MvvLvaRook.name] = &MvvLvaRook; AllParams[MvvLvaQueen.name] = &MvvLvaQueen; AllParams[MvvLvaKing.name] = &MvvLvaKing;
+    AllParams[RazoringMarginBase.name] = &RazoringMarginBase; AllParams[RazoringMarginPerDepth.name] = &RazoringMarginPerDepth;
+    
+    // Passed Pawn Arrays
+    PassedPawnMG[0] = &PassedPawnMG0; PassedPawnMG[1] = &PassedPawnMG1; PassedPawnMG[2] = &PassedPawnMG2; PassedPawnMG[3] = &PassedPawnMG3;
+    PassedPawnMG[4] = &PassedPawnMG4; PassedPawnMG[5] = &PassedPawnMG5; PassedPawnMG[6] = &PassedPawnMG6; PassedPawnMG[7] = &PassedPawnMG7;
+    for(int i=0; i<8; ++i) AllParams[PassedPawnMG[i]->name] = PassedPawnMG[i];
+    PassedPawnEG[0] = &PassedPawnEG0; PassedPawnEG[1] = &PassedPawnEG1; PassedPawnEG[2] = &PassedPawnEG2; PassedPawnEG[3] = &PassedPawnEG3;
+    PassedPawnEG[4] = &PassedPawnEG4; PassedPawnEG[5] = &PassedPawnEG5; PassedPawnEG[6] = &PassedPawnEG6; PassedPawnEG[7] = &PassedPawnEG7;
+    for(int i=0; i<8; ++i) AllParams[PassedPawnEG[i]->name] = PassedPawnEG[i];
+
+    // King Danger Arrays
+    KingDangerMG[0] = &KingDangerMG0; KingDangerMG[1] = &KingDangerMG1; KingDangerMG[2] = &KingDangerMG2; KingDangerMG[3] = &KingDangerMG3; KingDangerMG[4] = &KingDangerMG4;
+    KingDangerMG[5] = &KingDangerMG5; KingDangerMG[6] = &KingDangerMG6; KingDangerMG[7] = &KingDangerMG7; KingDangerMG[8] = &KingDangerMG8; KingDangerMG[9] = &KingDangerMG9;
+    KingDangerMG[10] = &KingDangerMG10; KingDangerMG[11] = &KingDangerMG11; KingDangerMG[12] = &KingDangerMG12; KingDangerMG[13] = &KingDangerMG13; KingDangerMG[14] = &KingDangerMG14;
+    for(int i=0; i<15; ++i) AllParams[KingDangerMG[i]->name] = KingDangerMG[i];
+    KingDangerEG[0] = &KingDangerEG0; KingDangerEG[1] = &KingDangerEG1; KingDangerEG[2] = &KingDangerEG2; KingDangerEG[3] = &KingDangerEG3; KingDangerEG[4] = &KingDangerEG4;
+    KingDangerEG[5] = &KingDangerEG5; KingDangerEG[6] = &KingDangerEG6; KingDangerEG[7] = &KingDangerEG7; KingDangerEG[8] = &KingDangerEG8; KingDangerEG[9] = &KingDangerEG9;
+    KingDangerEG[10] = &KingDangerEG10; KingDangerEG[11] = &KingDangerEG11; KingDangerEG[12] = &KingDangerEG12; KingDangerEG[13] = &KingDangerEG13; KingDangerEG[14] = &KingDangerEG14;
+    for(int i=0; i<15; ++i) AllParams[KingDangerEG[i]->name] = KingDangerEG[i];
+
+    // MVV-LVA Array
+    MvvLva[PAWN] = &MvvLvaPawn; MvvLva[KNIGHT] = &MvvLvaKnight; MvvLva[BISHOP] = &MvvLvaBishop;
+    MvvLva[ROOK] = &MvvLvaRook; MvvLva[QUEEN] = &MvvLvaQueen; MvvLva[KING] = &MvvLvaKing;
+}
+
+
+// --- BASE EVALUATION TABLES ---
+// NOTE: These are now only used for PSTs. All other logic uses TunableParams.
 
 // Forward Declarations
 struct Move;
@@ -510,9 +652,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
-const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
-
 // Piece Square Tables (values are for white, mirrored for black)
 const int pawn_pst[64] = {
      0,  0,  0,  0,  0,  0,  0,  0,   5, 10, 10,-20,-20, 10, 10,  5,
@@ -544,14 +683,14 @@ const int queen_pst[64] = {
       0,  0,  5,  5,  5,  5,  0, -5, -10,  0,  5,  5,  5,  5,  0,-10,
     -10,  0,  0,  0,  0,  0,  0,-10, -20,-10,-10, -5, -5,-10,-10,-20
 };
-const int king_pst_mg[64] = { // King safety oriented for midgame
-     20, 30, 10,  0,  0, 10, 30, 20,  // Castled king on G1/C1 gets +30 (mirrored for G8/C8)
+const int king_pst_mg[64] = {
+     20, 30, 10,  0,  0, 10, 30, 20,
      20, 20,  0,  0,  0,  0, 20, 20,
     -10,-20,-20,-20,-20,-20,-20,-10, -20,-30,-30,-40,-40,-30,-30,-20,
     -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30
 };
-const int king_pst_eg[64] = { // King activity for endgame
+const int king_pst_eg[64] = {
    -50,-30,-30,-30,-30,-30,-30,-50, -30,-10, 20, 30, 30, 20,-10,-30,
    -30, 10, 30, 40, 40, 30, 10,-30, -30, 10, 40, 50, 50, 40, 10,-30,
    -30, 10, 40, 50, 50, 40, 10,-30, -30, 10, 30, 40, 40, 30, 10,-30,
@@ -560,7 +699,7 @@ const int king_pst_eg[64] = { // King activity for endgame
 
 const int* pst_mg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_mg};
 const int* pst_eg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_eg};
-const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
+const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0};
 
 // Evaluation helper masks
 uint64_t file_bb_mask[8];
@@ -568,44 +707,6 @@ uint64_t rank_bb_mask[8];
 uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 uint64_t adjacent_files_mask[8];
-
-const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
-const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
-
-// Evaluation Constants
-const int TEMPO_BONUS = 8;
-
-const int protected_pawn_bonus_mg = 8;
-const int protected_pawn_bonus_eg = 12;
-
-const int isolated_pawn_penalty_mg = -12;
-const int isolated_pawn_penalty_eg = -20;
-const int doubled_pawn_liability_mg = -10;
-const int doubled_pawn_liability_eg = -14;
-const int hindered_pawn_penalty_mg = -7;
-const int hindered_pawn_penalty_eg = -12;
-
-const int knight_mobility_bonus_mg = 1;
-const int knight_mobility_bonus_eg = 2;
-const int bishop_mobility_bonus_mg = 2;
-const int bishop_mobility_bonus_eg = 3;
-const int rook_mobility_bonus_mg = 2;
-const int rook_mobility_bonus_eg = 4;
-const int queen_mobility_bonus_mg = 1;
-const int queen_mobility_bonus_eg = 2;
-
-const int dominant_knight_bonus_mg = 25;
-const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 19;
-const int dominant_bishop_bonus_eg = 15;
-const int potential_dominance_bonus = 5;
-
-const int minor_on_heavy_pressure_mg = 20;
-const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 14;
-const int rook_on_minor_pressure_eg = 9;
-
-const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -626,12 +727,12 @@ void init_eval_masks() {
         int r = sq / 8;
         int f = sq % 8;
 
-        for (int cur_r = r + 1; cur_r < 8; ++cur_r) { // Squares in front for White
+        for (int cur_r = r + 1; cur_r < 8; ++cur_r) {
             white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
             if (f > 0) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
             if (f < 7) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
         }
-        for (int cur_r = r - 1; cur_r >= 0; --cur_r) { // Squares in front for Black
+        for (int cur_r = r - 1; cur_r >= 0; --cur_r) {
             black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
             if (f > 0) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
             if (f < 7) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
@@ -641,67 +742,44 @@ void init_eval_masks() {
 
 // Checks for draw by insufficient material.
 bool is_insufficient_material(const Position& pos) {
-    // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
     if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) {
         return false;
     }
-
-    // Count minor pieces for both sides
     int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
     int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
     int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
     int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
-
     int white_minors = white_knights + white_bishops;
     int black_minors = black_knights + black_bishops;
 
-    // Case: K vs K
     if (white_minors == 0 && black_minors == 0) return true;
-
-    // Case: K + minor vs K
-    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) {
-        return true;
-    }
-
-    // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
-    if (white_minors == 1 && black_minors == 1) {
-        return true;
-    }
-
-    // Case: K+N+N vs K (generally treated as a draw)
+    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) return true;
+    if (white_minors == 1 && black_minors == 1) return true;
     if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
-        (white_minors == 0 && black_minors == 2 && black_knights == 2)) {
-        return true;
-    }
-
-    // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
+        (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
     return false;
 }
 
-
 int evaluate(const Position& pos) {
-    // Check for insufficient material draw at the beginning of evaluation.
     if (is_insufficient_material(pos)) {
-        return 0; // Draw score
+        return 0;
     }
 
     int mg_score = 0;
     int eg_score = 0;
     int game_phase = 0;
-    
-    // Mobility score accumulators
     int mg_mobility_score = 0;
     int eg_mobility_score = 0;
-    
-    // Attack bitboards for threat evaluation
-    uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
+    uint64_t piece_attacks_bb[2][6] = {{0}};
+
+    const int piece_values_mg[6] = {100, EvalParams::KnightValueMG.value, EvalParams::BishopValueMG.value, EvalParams::RookValueMG.value, EvalParams::QueenValueMG.value, 0};
+    const int piece_values_eg[6] = {100, EvalParams::KnightValueEG.value, EvalParams::BishopValueEG.value, EvalParams::RookValueEG.value, EvalParams::QueenValueEG.value, 0};
 
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         Color enemy_color = (Color)(1-c_idx);
         int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
-        
-        // Helper bitboards for mobility and pawn structure
+
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
         uint64_t attackable_squares = ~friendly_pieces;
@@ -709,7 +787,7 @@ int evaluate(const Position& pos) {
 
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
-        
+
         uint64_t enemy_pawn_attacks = 0;
         uint64_t temp_enemy_pawns = all_enemy_pawns;
         while(temp_enemy_pawns) {
@@ -718,8 +796,6 @@ int evaluate(const Position& pos) {
             temp_enemy_pawns &= temp_enemy_pawns - 1;
         }
 
-
-        // Material, PST, and Feature Evaluation
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
             game_phase += pop_count(b) * game_phase_inc[p];
@@ -733,37 +809,28 @@ int evaluate(const Position& pos) {
 
                 if ((Piece)p == PAWN) {
                     int f = sq % 8;
-                    // Isolated Pawn Evaluation
                     if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
-                        mg_score += side_multiplier * isolated_pawn_penalty_mg;
-                        eg_score += side_multiplier * isolated_pawn_penalty_eg;
+                        mg_score += side_multiplier * EvalParams::IsolatedPawnPenaltyMG.value;
+                        eg_score += side_multiplier * EvalParams::IsolatedPawnPenaltyEG.value;
                     }
-
-                    // Protected Pawn Evaluation
                     if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
-                        mg_score += side_multiplier * protected_pawn_bonus_mg;
-                        eg_score += side_multiplier * protected_pawn_bonus_eg;
+                        mg_score += side_multiplier * EvalParams::ProtectedPawnBonusMG.value;
+                        eg_score += side_multiplier * EvalParams::ProtectedPawnBonusEG.value;
                     }
-                    
-                    // Doubled Pawn Evaluation
                     uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
                     if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
-                         mg_score += side_multiplier * doubled_pawn_liability_mg;
-                         eg_score += side_multiplier * doubled_pawn_liability_eg;
+                         mg_score += side_multiplier * EvalParams::DoubledPawnPenaltyMG.value;
+                         eg_score += side_multiplier * EvalParams::DoubledPawnPenaltyEG.value;
                     }
-                    
-                    // Backward Pawn Evaluation
                     uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
                     uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
-                    if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
+                    if ((front_span & adjacent_pawns) == 0) {
                         int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
                         if (get_bit(enemy_pawn_attacks, push_sq)) {
-                           mg_score += side_multiplier * hindered_pawn_penalty_mg;
-                           eg_score += side_multiplier * hindered_pawn_penalty_eg;
+                           mg_score += side_multiplier * EvalParams::HinderedPawnPenaltyMG.value;
+                           eg_score += side_multiplier * EvalParams::HinderedPawnPenaltyEG.value;
                         }
                     }
-
-                    // Passed Pawn Evaluation
                     bool is_passed = false;
                     if (current_eval_color == WHITE) {
                         if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
@@ -772,17 +839,14 @@ int evaluate(const Position& pos) {
                     }
                     if (is_passed) {
                         int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-                        mg_score += side_multiplier * passed_pawn_bonus_mg[rank_from_own_side];
-                        eg_score += side_multiplier * passed_pawn_bonus_eg[rank_from_own_side];
-                        
-                        // Passed Pawn distance to enemy king
+                        mg_score += side_multiplier * EvalParams::PassedPawnMG[rank_from_own_side]->value;
+                        eg_score += side_multiplier * EvalParams::PassedPawnEG[rank_from_own_side]->value;
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
                         if (enemy_king_sq != -1) {
                             int pawn_rank = sq / 8; int pawn_file = sq % 8;
                             int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
                             int dist_to_enemy_king = std::max(abs(pawn_rank - king_rank), abs(pawn_file - king_file));
-                            // Bonus increases the further the king is, making it harder to stop the pawn
-                            eg_score += side_multiplier * dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
+                            eg_score += side_multiplier * dist_to_enemy_king * EvalParams::PassedPawnKingDistEG.value;
                         }
                     }
                 } else if ((Piece)p == ROOK) {
@@ -790,36 +854,36 @@ int evaluate(const Position& pos) {
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
-                        if (!enemy_pawn_on_file) { mg_score += side_multiplier * 20; eg_score += side_multiplier * 15; } // Open file
-                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 5;} // Semi-open file
+                        if (!enemy_pawn_on_file) {
+                            mg_score += side_multiplier * EvalParams::RookOpenFileMG.value;
+                            eg_score += side_multiplier * EvalParams::RookOpenFileEG.value;
+                        } else {
+                            mg_score += side_multiplier * EvalParams::RookSemiOpenFileMG.value;
+                            eg_score += side_multiplier * EvalParams::RookSemiOpenFileEG.value;
+                        }
                     }
-                    // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_eg;
+                    mg_score += side_multiplier * mobility_count * 0; // Disabled for now to reduce parameters
+                    eg_score += side_multiplier * mobility_count * 0;
                 }
-                // Mobility and other piece features
                 else if ((Piece)p == KNIGHT) {
                     uint64_t mobility_attacks = knight_attacks_bb[sq];
                     piece_attacks_bb[c_idx][KNIGHT] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
-                    
-                    // Knight Outpost Bonus
+                    mg_score += side_multiplier * mobility_count * 0;
+                    eg_score += side_multiplier * mobility_count * 0;
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                    if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
-                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
-                             if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
-                                mg_score += side_multiplier * dominant_knight_bonus_mg;
-                                eg_score += side_multiplier * dominant_knight_bonus_eg;
+                    if (relative_rank_idx >= 3 && relative_rank_idx <= 5) {
+                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) {
+                             if (!get_bit(enemy_pawn_attacks, sq)) {
+                                mg_score += side_multiplier * EvalParams::KnightOutpostMG.value;
+                                eg_score += side_multiplier * EvalParams::KnightOutpostEG.value;
                             }
                         }
                     }
-                    // Potential Outpost
                     uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
                     while(potential_outpost_moves) {
                         int to_sq = lsb_index(potential_outpost_moves);
@@ -828,8 +892,8 @@ int evaluate(const Position& pos) {
                         int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
                         if(to_relative_rank >= 3 && to_relative_rank <=5) {
                             if(get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
-                                mg_score += side_multiplier * potential_dominance_bonus;
-                                break; // Only count once per piece
+                                mg_score += side_multiplier * EvalParams::PotentialOutpostBonus.value;
+                                break;
                             }
                         }
                     }
@@ -837,17 +901,15 @@ int evaluate(const Position& pos) {
                     uint64_t mobility_attacks = get_bishop_attacks_from_sq(sq, occupied);
                     piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
-                    
-                    // Bishop Outpost Bonus
+                    mg_score += side_multiplier * mobility_count * 0;
+                    eg_score += side_multiplier * mobility_count * 0;
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
-                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
-                             if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
-                                mg_score += side_multiplier * dominant_bishop_bonus_mg;
-                                eg_score += side_multiplier * dominant_bishop_bonus_eg;
+                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) {
+                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) {
+                             if (!get_bit(enemy_pawn_attacks, sq)) {
+                                mg_score += side_multiplier * EvalParams::BishopOutpostMG.value;
+                                eg_score += side_multiplier * EvalParams::BishopOutpostEG.value;
                             }
                         }
                     }
@@ -855,86 +917,63 @@ int evaluate(const Position& pos) {
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
                     piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_eg;
+                    mg_score += side_multiplier * mobility_count * 0;
+                    eg_score += side_multiplier * mobility_count * 0;
                 } else if ((Piece)p == KING) {
                     piece_attacks_bb[c_idx][KING] |= king_attacks_bb[sq];
                 }
             }
         }
         if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
-            mg_score += side_multiplier * 30; eg_score += side_multiplier * 50;
+            mg_score += side_multiplier * EvalParams::BishopPairMG.value;
+            eg_score += side_multiplier * EvalParams::BishopPairEG.value;
         }
 
-        // --- Tactical Pressure & Threats ---
         uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
         uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
-
-        // Minor pieces attacking heavy pieces
         uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
-        if (pop_count(minor_attacks & enemy_rooks_and_queens) > 0) {
-            mg_score += side_multiplier * minor_on_heavy_pressure_mg * pop_count(minor_attacks & enemy_rooks_and_queens);
-            eg_score += side_multiplier * minor_on_heavy_pressure_eg * pop_count(minor_attacks & enemy_rooks_and_queens);
+        int pressure_count_minor_on_heavy = pop_count(minor_attacks & enemy_rooks_and_queens);
+        if (pressure_count_minor_on_heavy > 0) {
+            mg_score += side_multiplier * EvalParams::MinorOnHeavyPressureMG.value * pressure_count_minor_on_heavy;
+            eg_score += side_multiplier * EvalParams::MinorOnHeavyPressureEG.value * pressure_count_minor_on_heavy;
+        }
+        int pressure_count_rook_on_minor = pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
+        if (pressure_count_rook_on_minor > 0) {
+             mg_score += side_multiplier * EvalParams::RookOnMinorPressureMG.value * pressure_count_rook_on_minor;
+             eg_score += side_multiplier * EvalParams::RookOnMinorPressureEG.value * pressure_count_rook_on_minor;
         }
 
-        // Rooks attacking minor pieces
-        if (pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops) > 0) {
-             mg_score += side_multiplier * rook_on_minor_pressure_mg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
-             eg_score += side_multiplier * rook_on_minor_pressure_eg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
-        }
-
-        // --- King Safety and Pawn Shield ---
         int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[current_eval_color]);
         if (king_sq != -1) {
             int king_rank = king_sq / 8;
             int king_file = king_sq % 8;
-
-            // PAWN SHIELD
             int pawn_shield_score = 0;
-            const int shield_pawn_bonus = 12;
-            const int missing_shield_pawn_penalty = -18;
-            const int open_file_penalty_adj = -10; // Additional for open file on missing shield
-
             int shield_candidate_sqs[3] = {-1, -1, -1};
             bool relevant_castled_pos = false;
 
             if (current_eval_color == WHITE) {
-                if (king_sq == G1_SQ) { // White Kingside Castle
-                    shield_candidate_sqs[0] = G1_SQ + 7; shield_candidate_sqs[1] = G1_SQ + 8; shield_candidate_sqs[2] = G1_SQ + 9; // F2,G2,H2
-                    relevant_castled_pos = true;
-                } else if (king_sq == C1_SQ) { // White Queenside Castle
-                    shield_candidate_sqs[0] = C1_SQ + 7; shield_candidate_sqs[1] = C1_SQ + 8; shield_candidate_sqs[2] = C1_SQ + 9; // B2,C2,D2
-                    relevant_castled_pos = true;
-                }
-            } else { // BLACK
-                if (king_sq == G8_SQ) { // Black Kingside Castle
-                    shield_candidate_sqs[0] = G8_SQ - 9; shield_candidate_sqs[1] = G8_SQ - 8; shield_candidate_sqs[2] = G8_SQ - 7; // F7,G7,H7
-                    relevant_castled_pos = true;
-                } else if (king_sq == C8_SQ) { // Black Queenside Castle
-                    shield_candidate_sqs[0] = C8_SQ - 9; shield_candidate_sqs[1] = C8_SQ - 8; shield_candidate_sqs[2] = C8_SQ - 7; // B7,C7,D7
-                    relevant_castled_pos = true;
-                }
+                if (king_sq == G1_SQ) { shield_candidate_sqs[0] = G1_SQ + 7; shield_candidate_sqs[1] = G1_SQ + 8; shield_candidate_sqs[2] = G1_SQ + 9; relevant_castled_pos = true; }
+                else if (king_sq == C1_SQ) { shield_candidate_sqs[0] = C1_SQ + 7; shield_candidate_sqs[1] = C1_SQ + 8; shield_candidate_sqs[2] = C1_SQ + 9; relevant_castled_pos = true; }
+            } else {
+                if (king_sq == G8_SQ) { shield_candidate_sqs[0] = G8_SQ - 9; shield_candidate_sqs[1] = G8_SQ - 8; shield_candidate_sqs[2] = G8_SQ - 7; relevant_castled_pos = true; }
+                else if (king_sq == C8_SQ) { shield_candidate_sqs[0] = C8_SQ - 9; shield_candidate_sqs[1] = C8_SQ - 8; shield_candidate_sqs[2] = C8_SQ - 7; relevant_castled_pos = true; }
             }
-
             if (relevant_castled_pos) {
                 for (int sq_idx = 0; sq_idx < 3; ++sq_idx) {
                     int shield_sq = shield_candidate_sqs[sq_idx];
-                    // Ensure shield_sq is on board (it should be by construction from G1/C1 etc.)
                     if (shield_sq >=0 && shield_sq < 64) {
                         if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color) {
-                            pawn_shield_score += shield_pawn_bonus;
+                            pawn_shield_score += EvalParams::PawnShieldBonus.value;
                         } else {
-                            pawn_shield_score += missing_shield_pawn_penalty;
+                            pawn_shield_score += EvalParams::PawnShieldPenalty.value;
                             int shield_f = shield_sq % 8;
-                            bool friendly_pawn_on_shield_file = (file_bb_mask[shield_f] & all_friendly_pawns) != 0;
-                            bool enemy_pawn_on_shield_file = (file_bb_mask[shield_f] & all_enemy_pawns) != 0;
-                            if (!friendly_pawn_on_shield_file && !enemy_pawn_on_shield_file) {
-                                pawn_shield_score += open_file_penalty_adj;
+                            if (((file_bb_mask[shield_f] & all_friendly_pawns) == 0) && ((file_bb_mask[shield_f] & all_enemy_pawns) == 0)) {
+                                pawn_shield_score += EvalParams::PawnShieldOpenFilePenalty.value;
                             }
                         }
                     }
                 }
-            } else { // General pawn shield for non-standard king positions
+            } else {
                 int base_shield_rank = (current_eval_color == WHITE) ? (king_rank + 1) : (king_rank - 1);
                 if (base_shield_rank >= 0 && base_shield_rank < 8) {
                     for (int df = -1; df <= 1; ++df) {
@@ -942,14 +981,12 @@ int evaluate(const Position& pos) {
                         if (current_shield_file >= 0 && current_shield_file < 8) {
                             int shield_sq = base_shield_rank * 8 + current_shield_file;
                             if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color) {
-                                pawn_shield_score += shield_pawn_bonus / 2; // Smaller bonus
+                                pawn_shield_score += EvalParams::PawnShieldBonus.value / 2;
                             } else {
-                                pawn_shield_score += missing_shield_pawn_penalty / 2;
+                                pawn_shield_score += EvalParams::PawnShieldPenalty.value / 2;
                                 int shield_f = shield_sq % 8;
-                                bool friendly_pawn_on_gen_shield_file = (file_bb_mask[shield_f] & all_friendly_pawns) != 0;
-                                bool enemy_pawn_on_gen_shield_file = (file_bb_mask[shield_f] & all_enemy_pawns) != 0;
-                                if (!friendly_pawn_on_gen_shield_file && !enemy_pawn_on_gen_shield_file) {
-                                    pawn_shield_score += open_file_penalty_adj / 2;
+                                if (((file_bb_mask[shield_f] & all_friendly_pawns) == 0) && ((file_bb_mask[shield_f] & all_enemy_pawns) == 0)) {
+                                    pawn_shield_score += EvalParams::PawnShieldOpenFilePenalty.value / 2;
                                 }
                             }
                         }
@@ -957,59 +994,38 @@ int evaluate(const Position& pos) {
                 }
             }
             mg_score += side_multiplier * pawn_shield_score;
-            // eg_score += side_multiplier * (pawn_shield_score / 3); // Less emphasis in EG for shield
 
-            // KING SAFETY (ATTACKS ON KING'S IMMEDIATE VICINITY)
-            int king_attack_score = 0; // Aggregated score of attacks
-            uint64_t king_1_ring_zone = king_attacks_bb[king_sq]; // Squares king can move to
+            int king_attack_score = 0;
+            uint64_t king_1_ring_zone = king_attacks_bb[king_sq];
             uint64_t enemy_player_pieces = pos.color_bb[1 - current_eval_color];
             uint64_t occupied_bb = pos.get_occupied_bb();
 
             uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_player_pieces;
-            while(enemy_knights) {
-                int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
-                if (knight_attacks_bb[attacker_sq] & king_1_ring_zone) king_attack_score += 2;
-            }
+            while(enemy_knights) { int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1; if (knight_attacks_bb[attacker_sq] & king_1_ring_zone) king_attack_score += 2; }
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_player_pieces;
-            while(enemy_bishops) {
-                int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
-            }
+            while(enemy_bishops) { int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1; if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2; }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_player_pieces;
-            while(enemy_rooks) {
-                int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
-            }
+            while(enemy_rooks) { int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1; if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3; }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_player_pieces;
-            while(enemy_queens) {
-                int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
-            }
+            while(enemy_queens) { int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1; if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5; }
             uint64_t temp_king_zone_for_pawns = king_1_ring_zone;
-            while(temp_king_zone_for_pawns) {
-                int sq_in_kz = lsb_index(temp_king_zone_for_pawns); temp_king_zone_for_pawns &= temp_king_zone_for_pawns -1;
-                if (pawn_attacks_bb[current_eval_color][sq_in_kz] & all_enemy_pawns) { // Enemy pawns that attack this king zone square
-                    king_attack_score += 1;
-                }
-            }
-            int danger_idx = std::min(king_attack_score, 14); // Cap index for penalty table
-            mg_score -= side_multiplier * king_danger_penalty_mg[danger_idx];
-            eg_score -= side_multiplier * king_danger_penalty_eg[danger_idx];
+            while(temp_king_zone_for_pawns) { int sq_in_kz = lsb_index(temp_king_zone_for_pawns); temp_king_zone_for_pawns &= temp_king_zone_for_pawns -1; if (pawn_attacks_bb[current_eval_color][sq_in_kz] & all_enemy_pawns) { king_attack_score += 1; } }
+
+            int danger_idx = std::min(king_attack_score, 14);
+            mg_score -= side_multiplier * EvalParams::KingDangerMG[danger_idx]->value;
+            eg_score -= side_multiplier * EvalParams::KingDangerEG[danger_idx]->value;
         }
     }
 
-    // Incorporate mobility scores
     mg_score += mg_mobility_score;
     eg_score += eg_mobility_score;
 
-    // Add tempo bonus to the side to move
     if (pos.side_to_move == WHITE) {
-        mg_score += TEMPO_BONUS;
-        eg_score += TEMPO_BONUS;
+        mg_score += EvalParams::TempoBonus.value;
+        eg_score += EvalParams::TempoBonus.value;
     } else {
-        mg_score -= TEMPO_BONUS;
-        eg_score -= TEMPO_BONUS;
+        mg_score -= EvalParams::TempoBonus.value;
+        eg_score -= EvalParams::TempoBonus.value;
     }
 
     game_phase = std::min(game_phase, 24);
@@ -1047,7 +1063,7 @@ void init_tt(size_t mb_size) {
     while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) {
         power_of_2_entries *= 2;
     }
-     if (power_of_2_entries == 0) { // Should not happen if num_entries > 0
+     if (power_of_2_entries == 0) {
          transposition_table.clear(); tt_mask = 0; return;
     }
     try {
@@ -1113,20 +1129,17 @@ std::chrono::steady_clock::time_point search_start_timepoint;
 bool stop_search_flag = false;
 uint64_t nodes_searched = 0;
 
-// Time management globals
 std::chrono::steady_clock::time_point soft_limit_timepoint;
 std::chrono::steady_clock::time_point hard_limit_timepoint;
 bool use_time_limits = false;
 
-// Search Heuristics
 Move killer_moves[MAX_PLY][2];
 int move_history_score[2][64][64];
 constexpr int MAX_HISTORY_SCORE = 24000;
 
-// Repetition Detection Data Structures
-uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
+uint64_t game_history_hashes[256];
 int game_history_length = 0;
-uint64_t search_path_hashes[MAX_PLY]; // Stores hashes of positions in the current search path
+uint64_t search_path_hashes[MAX_PLY];
 
 void reset_search_state() {
     nodes_searched = 0;
@@ -1144,7 +1157,7 @@ void reset_killers_and_history() {
 
 bool check_time() {
     if (stop_search_flag) return true;
-    if ((nodes_searched & 2047) == 0) { // Check time every 2048 nodes
+    if ((nodes_searched & 2047) == 0) {
         if (use_time_limits) {
             if (std::chrono::steady_clock::now() > hard_limit_timepoint) {
                 stop_search_flag = true;
@@ -1155,33 +1168,33 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
-
 void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
+    const int current_mvv_lva[7] = {
+        EvalParams::MvvLva[PAWN]->value, EvalParams::MvvLva[KNIGHT]->value, EvalParams::MvvLva[BISHOP]->value,
+        EvalParams::MvvLva[ROOK]->value, EvalParams::MvvLva[QUEEN]->value, EvalParams::MvvLva[KING]->value, 0
+    };
+    
     for (int i = 0; i < num_moves; ++i) {
         Move& m = moves[i];
         if (!tt_move.is_null() && m == tt_move) {
-            m.score = 2000000; // TT move gets highest priority
+            m.score = 2000000;
         } else {
             Piece moved_piece = pos.piece_on_sq(m.from);
             Piece captured_piece = pos.piece_on_sq(m.to);
 
             if (captured_piece != NO_PIECE) {
-                // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-                m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
+                m.score = 1000000 + (current_mvv_lva[captured_piece] * 100) - current_mvv_lva[moved_piece];
             } else if (m.promotion != NO_PIECE) {
-                 m.score = 900000 + mvv_lva_piece_values[m.promotion];
+                 m.score = 900000 + current_mvv_lva[m.promotion];
             } else if (ply < MAX_PLY && !killer_moves[ply][0].is_null() && m == killer_moves[ply][0]) {
-                m.score = 800000; // First killer move
+                m.score = 800000;
             } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
-                m.score = 700000; // Second killer move
+                m.score = 700000;
             } else {
-                // History heuristic for quiet moves
                 m.score = move_history_score[pos.side_to_move][m.from][m.to];
             }
         }
     }
-    // Sort moves by score in descending order
     std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){ return a.score > b.score; });
 }
 
@@ -1193,10 +1206,10 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     int stand_pat_score;
 
     if (in_check) {
-        stand_pat_score = -INF_SCORE + ply; // If in check, we must make a move
+        stand_pat_score = -INF_SCORE + ply;
     } else {
         stand_pat_score = evaluate(pos);
-        if (stand_pat_score >= beta) return beta; // Fail-high
+        if (stand_pat_score >= beta) return beta;
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
 
@@ -1216,20 +1229,18 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 
         int score = -quiescence_search(next_pos, -beta, -alpha, ply + 1);
 
-        if (score >= beta) return beta; // Fail-high
+        if (score >= beta) return beta;
         if (score > alpha) alpha = score;
     }
 
-    // If in check and no legal moves found, it's mate
     if (in_check && legal_moves_in_qsearch == 0) {
-        return -MATE_SCORE + ply; // Mate score (deeper mates are worse)
+        return -MATE_SCORE + ply;
     }
 
     return alpha;
 }
 
 
-// Search function signature and repetition logic
 int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
     search_path_hashes[ply] = pos.zobrist_hash;
 
@@ -1252,50 +1263,38 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
          return tt_score;
     }
 
-    // --- Modern Pruning Techniques ---
     if (!is_pv_node && !in_check) {
         int static_eval = evaluate(pos);
-
-        // Reverse Futility Pruning (RFP)
-        // If our static eval is much better than beta, we can often prune this node.
         if (depth < 8) {
             int futility_margin = 90 + 60 * depth;
             if (static_eval - futility_margin >= beta) {
-                return beta; // Prune, assumes we have a winning position
+                return beta;
             }
         }
-
-        // Razoring
-        // If our static eval is very low, do a quick qsearch. If it's still bad, prune.
         if (depth < 4) {
-            int razoring_margin = 250 + 80 * (depth-1);
+            int razoring_margin = EvalParams::RazoringMarginBase.value + EvalParams::RazoringMarginPerDepth.value * (depth-1);
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha) {
-                    return alpha; // Prune, this branch seems hopeless
+                    return alpha;
                 }
             }
         }
     }
 
-
-    // Null Move Pruning (NMP)
     if (!is_pv_node && !in_check && can_null_move && depth >= 3 && ply > 0 &&
         (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 &&
         evaluate(pos) >= beta) {
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move;
-
             null_next_pos.zobrist_hash = pos.zobrist_hash;
             if (pos.ep_square != -1) null_next_pos.zobrist_hash ^= zobrist_ep[pos.ep_square];
             null_next_pos.ep_square = -1;
             null_next_pos.zobrist_hash ^= zobrist_ep[64];
             null_next_pos.zobrist_hash ^= zobrist_side_to_move;
             null_next_pos.ply = pos.ply + 1;
-
             int R_nmp = (depth > 6) ? 3 : 2;
             int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false);
-            
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
                  if (null_score >= MATE_THRESHOLD) null_score = beta;
@@ -1340,11 +1339,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition) {
             score = 0;
         } else {
-            if (legal_moves_played == 1) { // PVS: First move gets full window search
+            if (legal_moves_played == 1) {
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true);
             } else {
                 int R_lmr = 0;
-                // Late Move Reductions (LMR)
                 if (depth >= 3 && i >= 2 && !in_check && current_move.promotion == NO_PIECE &&
                     pos.piece_on_sq(current_move.to) == NO_PIECE) {
                     R_lmr = 1;
@@ -1355,7 +1353,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 }
 
                 score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true);
-                if (score > alpha && R_lmr > 0) { // Re-search if reduction was too aggressive
+                if (score > alpha && R_lmr > 0) {
                      score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true);
                 }
                 if (score > alpha && score < beta) {
@@ -1377,14 +1375,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                             killer_moves[ply][1] = killer_moves[ply][0];
                             killer_moves[ply][0] = current_move;
                         }
-
-                        // History Heuristic Update
                         int bonus = depth * depth;
-                        // Reward the move that caused the cutoff
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
                         good_hist += bonus - (good_hist * abs(bonus) / MAX_HISTORY_SCORE);
-
-                        // Penalize the quiet moves that came before this one
                         for (int j = 0; j < i; ++j) {
                             const Move& bad_move = moves[j];
                             if (pos.piece_on_sq(bad_move.to) == NO_PIECE && bad_move.promotion == NO_PIECE) {
@@ -1394,7 +1387,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         }
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
-                    return beta; // Fail-high
+                    return beta;
                 }
             }
         }
@@ -1415,11 +1408,10 @@ Position uci_root_pos;
 Move uci_best_move_overall;
 
 void parse_fen(Position& pos, const std::string& fen_str) {
-    pos = Position(); // Reset position object
+    pos = Position();
     std::stringstream ss(fen_str);
     std::string part;
 
-    // 1. Piece placement
     ss >> part;
     int rank = 7, file = 0;
     for (char c : part) {
@@ -1444,10 +1436,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
         }
     }
 
-    // 2. Side to move
     ss >> part; pos.side_to_move = (part == "w") ? WHITE : BLACK;
-
-    // 3. Castling rights
     ss >> part;
     pos.castling_rights = 0;
     for (char c : part) {
@@ -1456,8 +1445,6 @@ void parse_fen(Position& pos, const std::string& fen_str) {
         else if (c == 'k') pos.castling_rights |= BK_CASTLE_MASK;
         else if (c == 'q') pos.castling_rights |= BQ_CASTLE_MASK;
     }
-
-    // 4. En passant square
     ss >> part;
     if (part != "-") {
         if (part.length() == 2 && part[0] >= 'a' && part[0] <= 'h' && part[1] >= '1' && part[1] <= '8') {
@@ -1465,44 +1452,35 @@ void parse_fen(Position& pos, const std::string& fen_str) {
             int ep_rank = part[1] - '1';
             pos.ep_square = ep_rank * 8 + ep_file;
         } else {
-            pos.ep_square = -1; // Invalid EP string
+            pos.ep_square = -1;
         }
     } else {
         pos.ep_square = -1;
     }
-
-    // 5. Halfmove clock
     if (ss >> part) { try {pos.halfmove_clock = std::stoi(part);} catch(...) {pos.halfmove_clock = 0;} }
     else pos.halfmove_clock = 0;
-
-    // 6. Fullmove number
     if (ss >> part) { try {pos.fullmove_number = std::stoi(part);} catch(...){pos.fullmove_number = 1;} }
     else pos.fullmove_number = 1;
 
-    pos.ply = 0; // Ply at root is 0
+    pos.ply = 0;
     pos.zobrist_hash = calculate_zobrist_hash(pos);
-    
     game_history_length = 0;
 }
 
 Move parse_uci_move_from_string(const Position& current_pos, const std::string& uci_move_str) {
     Move m = NULL_MOVE;
-    if (uci_move_str.length() < 4 || uci_move_str.length() > 5) return m; // Invalid length
-    if (uci_move_str == "0000") return NULL_MOVE; // Null move notation
-
-
+    if (uci_move_str.length() < 4 || uci_move_str.length() > 5) return m;
+    if (uci_move_str == "0000") return NULL_MOVE;
     m.from = (uci_move_str[0] - 'a') + (uci_move_str[1] - '1') * 8;
     m.to = (uci_move_str[2] - 'a') + (uci_move_str[3] - '1') * 8;
-
-    if (m.from < 0 || m.from > 63 || m.to < 0 || m.to > 63) return NULL_MOVE; // Invalid square
-
+    if (m.from < 0 || m.from > 63 || m.to < 0 || m.to > 63) return NULL_MOVE;
     if (uci_move_str.length() == 5) {
         char promo_char = uci_move_str[4];
         if (promo_char == 'q') m.promotion = QUEEN;
         else if (promo_char == 'n') m.promotion = KNIGHT;
         else if (promo_char == 'b') m.promotion = BISHOP;
         else if (promo_char == 'r') m.promotion = ROOK;
-        else return NULL_MOVE; // Invalid promotion character
+        else return NULL_MOVE;
     }
     return m;
 }
@@ -1520,7 +1498,7 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
         }
     }
     h ^= zobrist_castling[pos.castling_rights];
-    h ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square]; // Use index 64 for no EP
+    h ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
     if (pos.side_to_move == BLACK) h ^= zobrist_side_to_move;
     return h;
 }
@@ -1534,9 +1512,15 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.2\n";
+            std::cout << "id name Amira 1.2 Unlocked\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
+            // Announce all tunable parameters automatically
+            for (const auto& pair : EvalParams::AllParams) {
+                const TunableParam* p = pair.second;
+                std::cout << "option name " << p->name << " type spin default " << p->default_val
+                          << " min " << p->min_val << " max " << p->max_val << "\n";
+            }
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) {
@@ -1546,19 +1530,26 @@ void uci_loop() {
             std::cout << "readyok\n" << std::flush;
         } else if (token == "setoption") {
             std::string name_token, value_token, name_str, value_str_val;
-            ss >> name_token; 
+            ss >> name_token;
             if (name_token == "name") {
-                ss >> name_str; 
-                ss >> value_token;
+                ss >> name_str;
+                ss >> value_token; // "value"
                 ss >> value_str_val;
 
                 if (name_str == "Hash") {
                     try {
-                        int parsed_size = std::stoi(value_str_val);
-                        g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 1024));
-                    } catch (...) { /* ignore parse error, keep default */ }
+                        g_configured_tt_size_mb = std::stoi(value_str_val);
+                    } catch (...) {}
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
+                } else {
+                    // Look up the parameter in our map and set its value
+                    auto it = EvalParams::AllParams.find(name_str);
+                    if (it != EvalParams::AllParams.end()) {
+                        try {
+                            it->second->value = std::stoi(value_str_val);
+                        } catch (...) {}
+                    }
                 }
             }
         } else if (token == "ucinewgame") {
@@ -1577,7 +1568,7 @@ void uci_loop() {
             if (token == "startpos") {
                 parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 std::string next_token_check;
-                if (ss >> next_token_check) { 
+                if (ss >> next_token_check) {
                     if (next_token_check == "moves") token = "moves";
                     else {
                         ss.clear();
@@ -1640,7 +1631,7 @@ void uci_loop() {
 
             if (root_legal_moves.size() == 1) {
                 std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
-                continue; 
+                continue;
             }
             if (root_legal_moves.empty()) {
                 std::cout << "bestmove 0000" << std::endl;
@@ -1657,7 +1648,7 @@ void uci_loop() {
                 else if (go_param == "depth") ss >> max_depth_to_search;
             }
 
-            reset_search_state(); 
+            reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
 
             long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
@@ -1681,12 +1672,12 @@ void uci_loop() {
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
-                if (depth <= 1) { 
+                if (depth <= 1) {
                      current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
                 } else {
                     current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
-                        aspiration_alpha = -INF_SCORE; 
+                        aspiration_alpha = -INF_SCORE;
                         aspiration_beta = INF_SCORE;
                         current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     }
@@ -1739,11 +1730,11 @@ void uci_loop() {
                             if (legal_pv) {
                                 std::cout << " " << move_to_uci(pv_m);
                                 temp_pos = next_temp_pos;
-                            } else { 
+                            } else {
                                 if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                                 break;
                             }
-                        } else { 
+                        } else {
                             if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                             break;
                         }
@@ -1791,6 +1782,7 @@ int main(int argc, char* argv[]) {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
+    init_parameters();
     init_zobrist();
     init_attack_tables();
     init_eval_masks();
