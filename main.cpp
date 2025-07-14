@@ -581,8 +581,8 @@ const int protected_pawn_bonus_eg = 12;
 const int isolated_pawn_penalty_mg = -12;
 const int isolated_pawn_penalty_eg = -20;
 const int doubled_pawn_liability_mg = -10;
-const int doubled_pawn_liability_eg = -15;
-const int hindered_pawn_penalty_mg = -8;
+const int doubled_pawn_liability_eg = -14;
+const int hindered_pawn_penalty_mg = -7;
 const int hindered_pawn_penalty_eg = -12;
 
 const int knight_mobility_bonus_mg = 1;
@@ -596,14 +596,14 @@ const int queen_mobility_bonus_eg = 2;
 
 const int dominant_knight_bonus_mg = 25;
 const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 20;
+const int dominant_bishop_bonus_mg = 19;
 const int dominant_bishop_bonus_eg = 15;
 const int potential_dominance_bonus = 5;
 
 const int minor_on_heavy_pressure_mg = 20;
 const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 15;
-const int rook_on_minor_pressure_eg = 10;
+const int rook_on_minor_pressure_mg = 14;
+const int rook_on_minor_pressure_eg = 9;
 
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
