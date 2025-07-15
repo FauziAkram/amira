@@ -21,7 +21,6 @@ enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 256;
-
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
@@ -42,7 +41,6 @@ constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king square
 const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
 const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
 
-
 // Forward Declarations
 struct Move;
 struct Position;
@@ -51,7 +49,6 @@ bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
-
 
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
@@ -137,7 +134,6 @@ uint64_t nw(uint64_t b) { return north(west(b)); }
 uint64_t ne(uint64_t b) { return north(east(b)); }
 uint64_t sw(uint64_t b) { return south(west(b)); }
 uint64_t se(uint64_t b) { return south(east(b)); }
-
 
 // --- Board Representation ---
 struct Position {
@@ -243,7 +239,6 @@ uint64_t get_slider_attacks_for_movegen(int sq, Piece piece_type, uint64_t occup
     if (piece_type == QUEEN) return get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
     return 0; // Should not happen
 }
-
 
 // --- is_square_attacked ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
@@ -709,7 +704,6 @@ int evaluate(const Position& pos) {
             temp_enemy_pawns &= temp_enemy_pawns - 1;
         }
 
-
         // Material, PST, and Feature Evaluation
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
@@ -1010,7 +1004,6 @@ int evaluate(const Position& pos) {
     return (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
 }
 
-
 // --- Transposition Table ---
 enum TTBound { TT_EXACT, TT_LOWER, TT_UPPER, TT_NONE };
 struct TTEntry {
@@ -1086,7 +1079,6 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
                           (depth > entry.depth) ||
                           (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
                           (depth == entry.depth && entry.bound == TT_NONE);
-
 
     if (should_replace) {
         entry.hash = hash;
@@ -1219,7 +1211,6 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     return alpha;
 }
 
-
 // Search function signature and repetition logic
 int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
     search_path_hashes[ply] = pos.zobrist_hash;
@@ -1268,7 +1259,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
     }
-
 
     // Null Move Pruning (NMP)
     if (!is_pv_node && !in_check && can_null_move && depth >= 3 && ply > 0 &&
@@ -1398,7 +1388,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
     return best_score;
 }
-
 
 // --- UCI ---
 Position uci_root_pos;
