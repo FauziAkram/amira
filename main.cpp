@@ -9,6 +9,7 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::abs
+#include <map>
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -37,6 +38,36 @@ constexpr int A1_SQ = 0; constexpr int E1_SQ = 4; constexpr int H1_SQ = 7;
 constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
 constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
 constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
+
+// --- Parameter Management Structure ---
+struct TunableParam {
+    std::string name;
+    int value;
+    int default_val;
+    int min_val;
+    int max_val;
+
+    TunableParam(std::string n, int def, int min, int max)
+        : name(n), value(def), default_val(def), min_val(min), max_val(max) {}
+};
+
+// --- Centralized namespace for all tunable parameters ---
+namespace EvalParams {
+    // Material Values
+    TunableParam KnightValueMG("KnightValueMG", 320, 250, 400), BishopValueMG("BishopValueMG", 330, 250, 420);
+    TunableParam RookValueMG("RookValueMG", 500, 400, 600), QueenValueMG("QueenValueMG", 900, 800, 1100);
+    TunableParam KnightValueEG("KnightValueEG", 320, 250, 400), BishopValueEG("BishopValueEG", 330, 250, 420);
+    TunableParam RookValueEG("RookValueEG", 530, 430, 630), QueenValueEG("QueenValueEG", 950, 850, 1150);
+}
+
+void init_parameters() {
+    using namespace EvalParams;
+    // Standard params
+    AllParams[KnightValueMG.name] = &KnightValueMG; AllParams[BishopValueMG.name] = &BishopValueMG;
+    AllParams[RookValueMG.name] = &RookValueMG; AllParams[QueenValueMG.name] = &QueenValueMG;
+    AllParams[KnightValueEG.name] = &KnightValueEG; AllParams[BishopValueEG.name] = &BishopValueEG;
+    AllParams[RookValueEG.name] = &RookValueEG; AllParams[QueenValueEG.name] = &QueenValueEG;
+    }
 
 // King safety penalty tables (index is king_attack_score, capped)
 const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
@@ -695,6 +726,9 @@ int evaluate(const Position& pos) {
     
     // Attack bitboards for threat evaluation
     uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
+
+    const int piece_values_mg[6] = {100, EvalParams::KnightValueMG.value, EvalParams::BishopValueMG.value, EvalParams::RookValueMG.value, EvalParams::QueenValueMG.value, 0};
+    const int piece_values_eg[6] = {100, EvalParams::KnightValueEG.value, EvalParams::BishopValueEG.value, EvalParams::RookValueEG.value, EvalParams::QueenValueEG.value, 0};
 
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
@@ -1791,6 +1825,7 @@ int main(int argc, char* argv[]) {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
+    init_parameters();
     init_zobrist();
     init_attack_tables();
     init_eval_masks();
