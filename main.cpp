@@ -996,17 +996,23 @@ bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
 void init_tt(size_t mb_size) {
-    if (mb_size == 0) transposition_table.clear(); tt_mask = 0; return;
+    if (mb_size == 0) {
+        transposition_table.clear(); tt_mask = 0; return;
+    }
 
     size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
-    if (num_entries == 0) transposition_table.clear(); tt_mask = 0; return;
+    if (num_entries == 0) {
+        transposition_table.clear(); tt_mask = 0; return;
+    }
 
     size_t power_of_2_entries = 1;
-    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries)
+    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) {
         power_of_2_entries *= 2;
+    }
 
-     if (power_of_2_entries == 0) // Should not happen if num_entries > 0
+     if (power_of_2_entries == 0) { // Should not happen if num_entries > 0
          transposition_table.clear(); tt_mask = 0; return;
+     }
 
     try {
         transposition_table.assign(power_of_2_entries, TTEntry());
