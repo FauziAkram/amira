@@ -385,12 +385,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     Piece piece_moved = pos.piece_on_sq(move.from);
     Piece piece_captured = pos.piece_on_sq(move.to); // Piece on 'to' square before move
 
-    if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) {
-        return pos; // Moving no piece or opponent's piece
-    }
-    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) {
-        return pos; // Tried to capture own piece
-    }
+    if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) return pos; // Moving no piece or opponent's piece
+    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) return pos; // Tried to capture own piece
 
     next_pos.zobrist_hash = pos.zobrist_hash;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
@@ -569,17 +565,14 @@ const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
 
 // Evaluation Constants
 const int TEMPO_BONUS = 8;
-
 const int protected_pawn_bonus_mg = 8;
 const int protected_pawn_bonus_eg = 12;
-
 const int isolated_pawn_penalty_mg = -12;
 const int isolated_pawn_penalty_eg = -20;
 const int doubled_pawn_liability_mg = -10;
 const int doubled_pawn_liability_eg = -15;
 const int hindered_pawn_penalty_mg = -8;
 const int hindered_pawn_penalty_eg = -12;
-
 const int knight_mobility_bonus_mg = 1;
 const int knight_mobility_bonus_eg = 2;
 const int bishop_mobility_bonus_mg = 2;
@@ -588,18 +581,15 @@ const int rook_mobility_bonus_mg = 2;
 const int rook_mobility_bonus_eg = 4;
 const int queen_mobility_bonus_mg = 1;
 const int queen_mobility_bonus_eg = 2;
-
 const int dominant_knight_bonus_mg = 25;
 const int dominant_knight_bonus_eg = 15;
 const int dominant_bishop_bonus_mg = 20;
 const int dominant_bishop_bonus_eg = 15;
 const int potential_dominance_bonus = 5;
-
 const int minor_on_heavy_pressure_mg = 20;
 const int minor_on_heavy_pressure_eg = 15;
 const int rook_on_minor_pressure_mg = 15;
 const int rook_on_minor_pressure_eg = 10;
-
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
 void init_eval_masks() {
@@ -618,9 +608,7 @@ void init_eval_masks() {
     for (int sq = 0; sq < 64; ++sq) {
         white_passed_pawn_block_mask[sq] = 0ULL;
         black_passed_pawn_block_mask[sq] = 0ULL;
-        int r = sq / 8;
-        int f = sq % 8;
-
+        int r = sq / 8, f = sq % 8;
         for (int cur_r = r + 1; cur_r < 8; ++cur_r) { // Squares in front for White
             white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
             if (f > 0) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
@@ -637,16 +625,13 @@ void init_eval_masks() {
 // Checks for draw by insufficient material.
 bool is_insufficient_material(const Position& pos) {
     // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
-    if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) {
-        return false;
-    }
+    if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) return false;
 
     // Count minor pieces for both sides
     int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
     int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
     int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
     int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
-
     int white_minors = white_knights + white_bishops;
     int black_minors = black_knights + black_bishops;
 
@@ -669,17 +654,10 @@ bool is_insufficient_material(const Position& pos) {
 
 int evaluate(const Position& pos) {
     // Check for insufficient material draw at the beginning of evaluation.
-    if (is_insufficient_material(pos)) {
-        return 0; // Draw score
-    }
+    if (is_insufficient_material(pos)) return 0; // Draw score
 
-    int mg_score = 0;
-    int eg_score = 0;
-    int game_phase = 0;
-    
-    // Mobility score accumulators
-    int mg_mobility_score = 0;
-    int eg_mobility_score = 0;
+    int mg_score = 0, eg_score = 0, game_phase = 0;
+    int mg_mobility_score = 0, eg_mobility_score = 0;
     
     // Attack bitboards for threat evaluation
     uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
@@ -765,7 +743,7 @@ int evaluate(const Position& pos) {
                         if (enemy_king_sq != -1) {
                             int pawn_rank = sq / 8; int pawn_file = sq % 8;
                             int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
-                            int dist_to_enemy_king = std::max(abs(pawn_rank - king_rank), abs(pawn_file - king_file));
+                            int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), abs(pawn_file - king_file));
                             // Bonus increases the further the king is, making it harder to stop the pawn
                             eg_score += side_multiplier * dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
                         }
@@ -871,15 +849,13 @@ int evaluate(const Position& pos) {
         // --- King Safety and Pawn Shield ---
         int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[current_eval_color]);
         if (king_sq != -1) {
-            int king_rank = king_sq / 8;
-            int king_file = king_sq % 8;
+            int king_rank = king_sq / 8, king_file = king_sq % 8;
 
             // PAWN SHIELD
             int pawn_shield_score = 0;
             const int shield_pawn_bonus = 12;
             const int missing_shield_pawn_penalty = -18;
             const int open_file_penalty_adj = -10; // Additional for open file on missing shield
-
             int shield_candidate_sqs[3] = {-1, -1, -1};
             bool relevant_castled_pos = false;
 
@@ -906,9 +882,9 @@ int evaluate(const Position& pos) {
                     int shield_sq = shield_candidate_sqs[sq_idx];
                     // Ensure shield_sq is on board (it should be by construction from G1/C1 etc.)
                     if (shield_sq >=0 && shield_sq < 64) {
-                        if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color) {
+                        if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color)
                             pawn_shield_score += shield_pawn_bonus;
-                        } else {
+                        else {
                             pawn_shield_score += missing_shield_pawn_penalty;
                             int shield_f = shield_sq % 8;
                             bool friendly_pawn_on_shield_file = (file_bb_mask[shield_f] & all_friendly_pawns) != 0;
@@ -1020,20 +996,18 @@ bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
 void init_tt(size_t mb_size) {
-    if (mb_size == 0) {
-        transposition_table.clear(); tt_mask = 0; return;
-    }
+    if (mb_size == 0) transposition_table.clear(); tt_mask = 0; return;
+
     size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
-    if (num_entries == 0) {
-        transposition_table.clear(); tt_mask = 0; return;
-    }
+    if (num_entries == 0) transposition_table.clear(); tt_mask = 0; return;
+
     size_t power_of_2_entries = 1;
-    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) {
+    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries)
         power_of_2_entries *= 2;
-    }
-     if (power_of_2_entries == 0) { // Should not happen if num_entries > 0
+
+     if (power_of_2_entries == 0) // Should not happen if num_entries > 0
          transposition_table.clear(); tt_mask = 0; return;
-    }
+
     try {
         transposition_table.assign(power_of_2_entries, TTEntry());
         tt_mask = power_of_2_entries - 1;
@@ -1362,14 +1336,14 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         int bonus = depth * depth;
                         // Reward the move that caused the cutoff
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
-                        good_hist += bonus - (good_hist * abs(bonus) / MAX_HISTORY_SCORE);
+                        good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
                         // Penalize the quiet moves that came before this one
                         for (int j = 0; j < i; ++j) {
                             const Move& bad_move = moves[j];
                             if (pos.piece_on_sq(bad_move.to) == NO_PIECE && bad_move.promotion == NO_PIECE) {
                                 int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
-                                bad_hist -= bonus - (bad_hist * abs(bonus) / MAX_HISTORY_SCORE);
+                                bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
                             }
                         }
                     }
@@ -1427,8 +1401,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
     ss >> part; pos.side_to_move = (part == "w") ? WHITE : BLACK;
 
     // 3. Castling rights
-    ss >> part;
-    pos.castling_rights = 0;
+    ss >> part; pos.castling_rights = 0;
     for (char c : part) {
         if (c == 'K') pos.castling_rights |= WK_CASTLE_MASK;
         else if (c == 'Q') pos.castling_rights |= WQ_CASTLE_MASK;
@@ -1443,12 +1416,8 @@ void parse_fen(Position& pos, const std::string& fen_str) {
             int ep_file = part[0] - 'a';
             int ep_rank = part[1] - '1';
             pos.ep_square = ep_rank * 8 + ep_file;
-        } else {
-            pos.ep_square = -1; // Invalid EP string
-        }
-    } else {
-        pos.ep_square = -1;
-    }
+        } else pos.ep_square = -1;
+    } else pos.ep_square = -1;
 
     // 5. Halfmove clock
     if (ss >> part) { try {pos.halfmove_clock = std::stoi(part);} catch(...) {pos.halfmove_clock = 0;} }
@@ -1646,9 +1615,8 @@ void uci_loop() {
                 double hard_limit_s = time_alotment_ms * 0.00041;
                 soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                 hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
-            } else {
+            } else
                 use_time_limits = false;
-            }
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
@@ -1659,9 +1627,9 @@ void uci_loop() {
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
-                if (depth <= 1) {
+                if (depth <= 1)
                      current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
-                } else {
+                else {
                     current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                         aspiration_alpha = -INF_SCORE;
