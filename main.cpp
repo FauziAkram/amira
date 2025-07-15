@@ -58,6 +58,9 @@ namespace EvalParams {
     TunableParam RookValueMG("RookValueMG", 500, 400, 600), QueenValueMG("QueenValueMG", 900, 800, 1100);
     TunableParam KnightValueEG("KnightValueEG", 320, 250, 400), BishopValueEG("BishopValueEG", 330, 250, 420);
     TunableParam RookValueEG("RookValueEG", 530, 430, 630), QueenValueEG("QueenValueEG", 950, 850, 1150);
+
+    // Map to hold all parameters for easy access by UCI
+    std::map<std::string, TunableParam*> AllParams;
 }
 
 void init_parameters() {
@@ -539,10 +542,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     legal_move_flag = true;
     return next_pos;
 }
-
-// --- Evaluation ---
-const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
-const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
 
 // Piece Square Tables (values are for white, mirrored for black)
 const int pawn_pst[64] = {
