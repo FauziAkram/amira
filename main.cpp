@@ -659,25 +659,18 @@ bool is_insufficient_material(const Position& pos) {
     if (white_minors == 0 && black_minors == 0) return true;
 
     // Case: K + minor vs K
-    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) {
-        return true;
-    }
+    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) return true;
 
     // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
-    if (white_minors == 1 && black_minors == 1) {
-        return true;
-    }
+    if (white_minors == 1 && black_minors == 1) return true;
 
     // Case: K+N+N vs K (generally treated as a draw)
     if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
-        (white_minors == 0 && black_minors == 2 && black_knights == 2)) {
-        return true;
-    }
+        (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
 
     // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
     return false;
 }
-
 
 int evaluate(const Position& pos) {
     // Check for insufficient material draw at the beginning of evaluation.
@@ -706,10 +699,8 @@ int evaluate(const Position& pos) {
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
         uint64_t attackable_squares = ~friendly_pieces;
         uint64_t occupied = pos.get_occupied_bb();
-
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
-        
         uint64_t enemy_pawn_attacks = 0;
         uint64_t temp_enemy_pawns = all_enemy_pawns;
         while(temp_enemy_pawns) {
@@ -1285,7 +1276,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         evaluate(pos) >= beta) {
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move;
-
             null_next_pos.zobrist_hash = pos.zobrist_hash;
             if (pos.ep_square != -1) null_next_pos.zobrist_hash ^= zobrist_ep[pos.ep_square];
             null_next_pos.ep_square = -1;
@@ -1481,7 +1471,6 @@ void parse_fen(Position& pos, const std::string& fen_str) {
 
     pos.ply = 0; // Ply at root is 0
     pos.zobrist_hash = calculate_zobrist_hash(pos);
-    
     game_history_length = 0;
 }
 
@@ -1546,9 +1535,9 @@ void uci_loop() {
             std::cout << "readyok\n" << std::flush;
         } else if (token == "setoption") {
             std::string name_token, value_token, name_str, value_str_val;
-            ss >> name_token; 
+            ss >> name_token;
             if (name_token == "name") {
-                ss >> name_str; 
+                ss >> name_str;
                 ss >> value_token;
                 ss >> value_str_val;
 
@@ -1577,7 +1566,7 @@ void uci_loop() {
             if (token == "startpos") {
                 parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 std::string next_token_check;
-                if (ss >> next_token_check) { 
+                if (ss >> next_token_check) {
                     if (next_token_check == "moves") token = "moves";
                     else {
                         ss.clear();
@@ -1640,7 +1629,7 @@ void uci_loop() {
 
             if (root_legal_moves.size() == 1) {
                 std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
-                continue; 
+                continue;
             }
             if (root_legal_moves.empty()) {
                 std::cout << "bestmove 0000" << std::endl;
@@ -1657,7 +1646,7 @@ void uci_loop() {
                 else if (go_param == "depth") ss >> max_depth_to_search;
             }
 
-            reset_search_state(); 
+            reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
 
             long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
@@ -1681,12 +1670,12 @@ void uci_loop() {
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
-                if (depth <= 1) { 
+                if (depth <= 1) {
                      current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
                 } else {
                     current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
-                        aspiration_alpha = -INF_SCORE; 
+                        aspiration_alpha = -INF_SCORE;
                         aspiration_beta = INF_SCORE;
                         current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
                     }
@@ -1739,7 +1728,7 @@ void uci_loop() {
                             if (legal_pv) {
                                 std::cout << " " << move_to_uci(pv_m);
                                 temp_pos = next_temp_pos;
-                            } else { 
+                            } else {
                                 if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                                 break;
                             }
