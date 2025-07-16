@@ -1739,6 +1739,67 @@ void uci_loop() {
     }
 }
 
+
+// --- PERFT - For Debugging Move Generation ---
+
+uint64_t perft(Position& pos, int depth) {
+    if (depth == 0) {
+        return 1ULL; // Unsigned Long Long for 1
+    }
+
+    Move moves[256];
+    int num_moves = generate_moves(pos, moves, false); // Generate all pseudo-legal moves
+    uint64_t total_nodes = 0;
+
+    for (int i = 0; i < num_moves; ++i) {
+        bool is_legal;
+        Position next_pos = make_move(pos, moves[i], is_legal);
+        if (!is_legal) {
+            continue; // Skip illegal moves
+        }
+        total_nodes += perft(next_pos, depth - 1);
+    }
+    return total_nodes;
+}
+
+void run_perft_test(Position& pos, int depth) {
+    std::cout << "Starting Perft Test to depth " << depth << std::endl;
+
+    auto start_time = std::chrono::steady_clock::now();
+    uint64_t total_nodes = 0;
+
+    Move moves[256];
+    int num_moves = generate_moves(pos, moves, false);
+
+    // Sort moves for consistent output, alphabetically by UCI string
+    std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){
+        return move_to_uci(a) < move_to_uci(b);
+    });
+
+    for (int i = 0; i < num_moves; ++i) {
+        bool is_legal;
+        Position next_pos = make_move(pos, moves[i], is_legal);
+        if (!is_legal) {
+            continue;
+        }
+
+        uint64_t nodes_for_move = perft(next_pos, depth - 1);
+        total_nodes += nodes_for_move;
+        std::cout << move_to_uci(moves[i]) << ": " << nodes_for_move << std::endl;
+    }
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    if (elapsed_ms == 0) elapsed_ms = 1; // Prevent division by zero
+
+    std::cout << "\n----------------------------" << std::endl;
+    std::cout << "Depth: " << depth << std::endl;
+    std::cout << "Nodes: " << total_nodes << std::endl;
+    std::cout << "Time:  " << elapsed_ms << " ms" << std::endl;
+    std::cout << "NPS:   " << (total_nodes * 1000 / elapsed_ms) << std::endl;
+}
+
+
 int main(int argc, char* argv[]) {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
@@ -1748,6 +1809,39 @@ int main(int argc, char* argv[]) {
     init_eval_masks();
     reset_killers_and_history();
 
-    uci_loop();
+    // Check for command-line arguments to run perft
+    if (argc > 1 && std::string(argv[1]) == "perft") {
+        if (argc < 3) {
+            std::cerr << "Usage: ./your_engine_name perft <depth> [fen_string]" << std::endl;
+            return 1;
+        }
+
+        int depth = 0;
+        try {
+            depth = std::stoi(argv[2]);
+        } catch(...) {
+            std::cerr << "Invalid depth: " << argv[2] << std::endl;
+            return 1;
+        }
+
+        std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; // Default FEN
+        if (argc > 3) {
+            fen = "";
+            for (int i = 3; i < argc; ++i) {
+                fen += argv[i];
+                if (i < argc - 1) fen += " ";
+            }
+        }
+        
+        Position perft_pos;
+        parse_fen(perft_pos, fen);
+        
+        run_perft_test(perft_pos, depth);
+
+    } else {
+        // If no "perft" argument, run the normal UCI loop
+        uci_loop();
+    }
+
     return 0;
 }
