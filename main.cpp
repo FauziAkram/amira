@@ -206,8 +206,8 @@ uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
             if (s < 0 || s >= 64) break;
             int r_curr = s / 8, c_curr = s % 8;
             int r_prev = (s-d) / 8, c_prev = (s-d) % 8; // (s-d) is original square
-            if (abs(d) == 1 && r_curr != r_prev) break; // Horizontal wrap-around
-            if (abs(d) == 8 && c_curr != c_prev) break; // Vertical wrap-around
+            if (std::abs(d) == 1 && r_curr != r_prev) break; // Horizontal wrap-around
+            if (std::abs(d) == 8 && c_curr != c_prev) break; // Vertical wrap-around
 
             attacks |= set_bit(s);
             if (get_bit(occupied, s)) break;
@@ -224,7 +224,7 @@ uint64_t get_bishop_attacks_from_sq(int sq, uint64_t occupied) {
             if (s < 0 || s >= 64) break;
             int r_curr = s / 8, c_curr = s % 8;
             int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
-            if (abs(r_curr - r_prev) != 1 || abs(c_curr - c_prev) != 1) break; // Diagonal wrap-around
+            if (std::abs(r_curr - r_prev) != 1 || std::abs(c_curr - c_prev) != 1) break; // Diagonal wrap-around
 
             attacks |= set_bit(s);
             if (get_bit(occupied, s)) break;
@@ -413,7 +413,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
     next_pos.ep_square = -1;
-    if (piece_moved == PAWN && abs(move.to - move.from) == 16) {
+    if (piece_moved == PAWN && std::abs(move.to - move.from) == 16) {
         next_pos.ep_square = (stm == WHITE) ? move.from + 8 : move.from - 8;
     }
     next_pos.zobrist_hash ^= zobrist_ep[(next_pos.ep_square == -1) ? 64 : next_pos.ep_square];
@@ -440,7 +440,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         else new_castling_rights &= ~(BK_CASTLE_MASK | BQ_CASTLE_MASK);
 
         // Handle castling move itself (rook movement)
-        if (abs(move.to - move.from) == 2) { // King moved two squares
+        if (std::abs(move.to - move.from) == 2) { // King moved two squares
             int rook_from_sq, rook_to_sq;
             if (move.to == E1_SQ + 2) { rook_from_sq = H1_SQ; rook_to_sq = E1_SQ + 1; } // White Kingside
             else if (move.to == E1_SQ - 2) { rook_from_sq = A1_SQ; rook_to_sq = E1_SQ - 1; } // White Queenside
@@ -743,7 +743,7 @@ int evaluate(const Position& pos) {
                         if (enemy_king_sq != -1) {
                             int pawn_rank = sq / 8; int pawn_file = sq % 8;
                             int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
-                            int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), abs(pawn_file - king_file));
+                            int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), std::abs(pawn_file - king_file));
                             // Bonus increases the further the king is, making it harder to stop the pawn
                             eg_score += side_multiplier * dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
                         }
@@ -1646,7 +1646,7 @@ void uci_loop() {
 
                 if (stop_search_flag && depth > 1) break;
 
-                if (abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
+                if (std::abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
                     aspiration_alpha = current_score - aspiration_window_delta;
                     aspiration_beta = current_score + aspiration_window_delta;
                     aspiration_window_delta += aspiration_window_delta / 3 + 5;
@@ -1707,7 +1707,7 @@ void uci_loop() {
                 if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
                     break;
                 }
-                if (abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
+                if (std::abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
                 if (depth >= max_depth_to_search) break;
             }
 
