@@ -1191,6 +1191,38 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     return alpha;
 }
 
+// *** REPETITION DETECTION REFACTOR ***
+// This helper function encapsulates the logic for detecting draw by repetition.
+bool is_draw_by_repetition(uint64_t hash_to_check, int parent_ply) {
+    // A position is considered a repetition if the same hash has appeared before
+    // in the history of reversible moves. We check both the game history that led
+    // to the current search, and the path taken within the search itself.
+    //
+    // NOTE: While these are linear scans, the total number of positions to check is
+    // bounded by the 50-move rule (pos.halfmove_clock < 100), which is checked
+    // at the top of the main search function. This makes the logic correct and
+    // acceptably fast without major architectural changes.
+
+    // Check the current search path from the root to the parent node.
+    // We check positions with the same side-to-move as the new position,
+    // which are 2 ply apart from the parent's perspective.
+    for (int i = parent_ply - 1; i >= 0; i -= 2) {
+        if (search_path_hashes[i] == hash_to_check) {
+            return true;
+        }
+    }
+
+    // Check the game history that preceded this search. The UCI loop ensures
+    // this array only contains the sequence of reversible moves leading to the search root.
+    for (int i = 0; i < game_history_length; ++i) {
+        if (game_history_hashes[i] == hash_to_check) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Search function signature and repetition logic
 int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
     search_path_hashes[ply] = pos.zobrist_hash;
@@ -1199,7 +1231,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (check_time()) return 0;
     if (ply >= MAX_PLY -1) return evaluate(pos);
     
+    // Draw by 50-move rule
     if (pos.halfmove_clock >= 100 && ply > 0) return 0;
+    
+    // Draw by insufficient material (only check after root)
     if (ply > 0 && is_insufficient_material(pos)) return 0;
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
@@ -1281,23 +1316,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         legal_moves_played++;
         int score;
 
-        bool is_repetition = false;
-        for (int k = ply - 1; k >= 0; k -= 2) {
-            if (search_path_hashes[k] == next_pos.zobrist_hash) {
-                is_repetition = true;
-                break;
-            }
-        }
-        if (!is_repetition) {
-            for (int k = 0; k < game_history_length; ++k) {
-                if (game_history_hashes[k] == next_pos.zobrist_hash) {
-                    is_repetition = true;
-                    break;
-                }
-            }
-        }
-
-        if (is_repetition) {
+        // Check for draw by repetition before searching deeper
+        if (is_draw_by_repetition(next_pos.zobrist_hash, ply)) {
             score = 0;
         } else {
             if (legal_moves_played == 1) { // PVS: First move gets full window search
