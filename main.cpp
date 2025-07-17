@@ -41,7 +41,6 @@ constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king square
 const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
 const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
 
-
 // Forward Declarations
 struct Move;
 struct Position;
@@ -1508,7 +1507,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.2\n";
+            std::cout << "id name Amira 1.21\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
