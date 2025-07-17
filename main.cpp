@@ -563,8 +563,12 @@ uint64_t adjacent_files_mask[8];
 const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
 const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
 
-// Evaluation Constants
+// --- Evaluation Constants ---
 const int TEMPO_BONUS = 8;
+const int BISHOP_PAIR_BONUS_MG = 30;
+const int BISHOP_PAIR_BONUS_EG = 50;
+const int PAWN_CONNECTED_BONUS_MG = 10;
+const int PAWN_CONNECTED_BONUS_EG = 14;
 const int protected_pawn_bonus_mg = 8;
 const int protected_pawn_bonus_eg = 12;
 const int isolated_pawn_penalty_mg = -12;
@@ -591,6 +595,10 @@ const int minor_on_heavy_pressure_eg = 15;
 const int rook_on_minor_pressure_mg = 15;
 const int rook_on_minor_pressure_eg = 10;
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
+const int ROOK_OPEN_FILE_MG = 20;
+const int ROOK_OPEN_FILE_EG = 15;
+const int ROOK_SEMI_OPEN_FILE_MG = 10;
+const int ROOK_SEMI_OPEN_FILE_EG = 5;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -707,6 +715,12 @@ int evaluate(const Position& pos) {
                         mg_score += side_multiplier * protected_pawn_bonus_mg;
                         eg_score += side_multiplier * protected_pawn_bonus_eg;
                     }
+
+                    // Connected Pawn (Phalanx) Bonus
+                    if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
+                        mg_score += side_multiplier * PAWN_CONNECTED_BONUS_MG;
+                        eg_score += side_multiplier * PAWN_CONNECTED_BONUS_EG;
+                    }
                     
                     // Doubled Pawn Evaluation
                     uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
@@ -753,8 +767,13 @@ int evaluate(const Position& pos) {
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
-                        if (!enemy_pawn_on_file) { mg_score += side_multiplier * 20; eg_score += side_multiplier * 15; } // Open file
-                        else { mg_score += side_multiplier * 10; eg_score += side_multiplier * 5;} // Semi-open file
+                        if (!enemy_pawn_on_file) { // Open file
+                            mg_score += side_multiplier * ROOK_OPEN_FILE_MG; 
+                            eg_score += side_multiplier * ROOK_OPEN_FILE_EG; 
+                        } else { // Semi-open file
+                            mg_score += side_multiplier * ROOK_SEMI_OPEN_FILE_MG; 
+                            eg_score += side_multiplier * ROOK_SEMI_OPEN_FILE_EG;
+                        } 
                     }
                     // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied);
@@ -826,7 +845,8 @@ int evaluate(const Position& pos) {
             }
         }
         if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
-            mg_score += side_multiplier * 30; eg_score += side_multiplier * 50;
+            mg_score += side_multiplier * BISHOP_PAIR_BONUS_MG; 
+            eg_score += side_multiplier * BISHOP_PAIR_BONUS_EG;
         }
 
         // --- Tactical Pressure & Threats ---
@@ -1487,7 +1507,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.2\n";
+            std::cout << "id name Amira 1.21\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
