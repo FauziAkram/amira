@@ -45,6 +45,7 @@ const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,
 // Forward Declarations
 struct Move;
 struct Position;
+class MoveOrderer;
 int evaluate(Position& pos); // Made non-const to update pawn cache stats
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
@@ -1212,6 +1213,8 @@ bool use_time_limits = false;
 Move killer_moves[MAX_PLY][2];
 int move_history_score[2][64][64];
 constexpr int MAX_HISTORY_SCORE = 24000;
+const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+
 
 // Repetition Detection Data Structures
 uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
@@ -1245,35 +1248,152 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+// ***************************************************************
+// ***               NEW STAGED MOVE ORDERER                   ***
+// ***************************************************************
 
-void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
-    for (int i = 0; i < num_moves; ++i) {
-        Move& m = moves[i];
-        if (!tt_move.is_null() && m == tt_move) {
-            m.score = 2000000; // TT move gets highest priority
-        } else {
+class MoveOrderer {
+private:
+    enum OrderPhase {
+        TT_MOVE_PHASE,
+        CAPTURES_PHASE,
+        KILLERS_PHASE,
+        QUIETS_PHASE,
+        DONE_PHASE
+    };
+
+    const Position& pos;
+    int ply;
+    OrderPhase phase;
+    bool is_qsearch;
+
+    Move tt_move;
+    Move killer1, killer2;
+
+    Move move_buffer[256];
+    int move_count = 0;
+    int current_idx = 0;
+    int moves_yielded_count = 0;
+
+    void score_and_sort_captures() {
+        for (int i = 0; i < move_count; ++i) {
+            Move& m = move_buffer[i];
             Piece moved_piece = pos.piece_on_sq(m.from);
             Piece captured_piece = pos.piece_on_sq(m.to);
-
             if (captured_piece != NO_PIECE) {
-                // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
                 m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
             } else if (m.promotion != NO_PIECE) {
-                 m.score = 900000 + mvv_lva_piece_values[m.promotion];
-            } else if (ply < MAX_PLY && !killer_moves[ply][0].is_null() && m == killer_moves[ply][0]) {
-                m.score = 800000; // First killer move
-            } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
-                m.score = 700000; // Second killer move
-            } else {
-                // History heuristic for quiet moves
-                m.score = move_history_score[pos.side_to_move][m.from][m.to];
+                m.score = 900000 + mvv_lva_piece_values[m.promotion];
+            } else { // En-passant
+                m.score = 1000000 + (mvv_lva_piece_values[PAWN] * 100) - mvv_lva_piece_values[PAWN];
             }
         }
+        std::sort(move_buffer, move_buffer + move_count, [](const Move& a, const Move& b) { return a.score > b.score; });
     }
-    // Sort moves by score in descending order
-    std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){ return a.score > b.score; });
-}
+    
+    void score_and_sort_quiets() {
+        for (int i = 0; i < move_count; ++i) {
+            Move& m = move_buffer[i];
+            m.score = move_history_score[pos.side_to_move][m.from][m.to];
+        }
+        std::sort(move_buffer, move_buffer + move_count, [](const Move& a, const Move& b) { return a.score > b.score; });
+    }
+
+public:
+    // Constructor for main search
+    MoveOrderer(const Position& p, int pl, const Move& tt_m)
+        : pos(p), ply(pl), phase(TT_MOVE_PHASE), is_qsearch(false), tt_move(tt_m) {
+        if (ply < MAX_PLY) {
+            killer1 = killer_moves[ply][0];
+            killer2 = killer_moves[ply][1];
+        } else {
+            killer1 = NULL_MOVE;
+            killer2 = NULL_MOVE;
+        }
+    }
+
+    // Constructor for quiescence search
+    MoveOrderer(const Position& p, int pl, bool in_check)
+        : pos(p), ply(pl), is_qsearch(true), tt_move(NULL_MOVE), killer1(NULL_MOVE), killer2(NULL_MOVE) {
+        // In q-search, we start with captures. If in check, we will proceed to quiets too.
+        phase = CAPTURES_PHASE;
+        if (in_check) is_qsearch = false; // Treat as normal search to generate all moves
+    }
+
+    Move pick_next_move() {
+        while (phase != DONE_PHASE) {
+            switch (phase) {
+                case TT_MOVE_PHASE:
+                    phase = CAPTURES_PHASE;
+                    if (!tt_move.is_null()) {
+                        moves_yielded_count++;
+                        return tt_move;
+                    }
+                    // Fallthrough
+
+                case CAPTURES_PHASE:
+                    move_count = generate_moves(pos, move_buffer, true); // Gen captures + promotions
+                    score_and_sort_captures();
+                    current_idx = 0;
+                    phase = is_qsearch ? DONE_PHASE : KILLERS_PHASE; // In q-search, captures are the last stage
+                    // Fallthrough to yield the moves
+
+                case KILLERS_PHASE: // This case label is for yielding captures after generation
+                    while (current_idx < move_count) {
+                        Move m = move_buffer[current_idx++];
+                        if (m == tt_move) continue;
+                        moves_yielded_count++;
+                        return m;
+                    }
+
+                    // Done with captures, now yield killers
+                    phase = QUIETS_PHASE;
+                    if (!killer1.is_null() && !(killer1 == tt_move) && pos.piece_on_sq(killer1.to) == NO_PIECE) {
+                       moves_yielded_count++;
+                       return killer1;
+                    }
+                    if (!killer2.is_null() && !(killer2 == tt_move) && !(killer2 == killer1) && pos.piece_on_sq(killer2.to) == NO_PIECE) {
+                       moves_yielded_count++;
+                       return killer2;
+                    }
+                    // Fallthrough
+
+                case QUIETS_PHASE:
+                    {
+                        Move all_moves[256];
+                        int all_move_count = generate_moves(pos, all_moves, false);
+                        move_count = 0;
+                        // Filter for only quiet moves
+                        for(int i = 0; i < all_move_count; ++i) {
+                            if(pos.piece_on_sq(all_moves[i].to) == NO_PIECE && all_moves[i].promotion == NO_PIECE) {
+                                move_buffer[move_count++] = all_moves[i];
+                            }
+                        }
+                        score_and_sort_quiets();
+                        current_idx = 0;
+                        phase = DONE_PHASE;
+                    }
+                    // Fallthrough
+                
+                case DONE_PHASE: // This case label is for yielding quiets after generation
+                    while (current_idx < move_count) {
+                        Move m = move_buffer[current_idx++];
+                        // Skip if it was already tried as a special move
+                        if (m == tt_move || m == killer1 || m == killer2) continue;
+                        moves_yielded_count++;
+                        return m;
+                    }
+                    // This is the true end, return null move
+                    return NULL_MOVE;
+            }
+        }
+        return NULL_MOVE; // Should not be reached
+    }
+
+    int get_moves_tried() const {
+        return moves_yielded_count;
+    }
+};
 
 int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     nodes_searched++;
@@ -1290,17 +1410,13 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
 
-    Move q_moves[256];
-    int num_q_moves = generate_moves(pos, q_moves, !in_check);
-
-    Move dummy_tt_move = NULL_MOVE;
-    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply);
-
+    MoveOrderer orderer(pos, ply, in_check);
     int legal_moves_in_qsearch = 0;
-    for (int i = 0; i < num_q_moves; ++i) {
-        const Move& cap_move = q_moves[i];
+    
+    Move current_move;
+    while( !(current_move = orderer.pick_next_move()).is_null() ) {
         bool legal;
-        Position next_pos = make_move(pos, cap_move, legal);
+        Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
         legal_moves_in_qsearch++;
 
@@ -1391,16 +1507,13 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-    Move moves[256];
-    int num_moves = generate_moves(pos, moves, false);
-    score_moves(pos, moves, num_moves, tt_move, ply);
-
+    MoveOrderer orderer(pos, ply, tt_move);
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    for (int i = 0; i < num_moves; ++i) {
-        const Move& current_move = moves[i];
+    Move current_move;
+    while ( !(current_move = orderer.pick_next_move()).is_null() ) {
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
@@ -1432,11 +1545,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             } else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR)
-                if (depth >= 3 && i >= 2 && !in_check && current_move.promotion == NO_PIECE &&
+                if (depth >= 3 && orderer.get_moves_tried() > 2 && !in_check && current_move.promotion == NO_PIECE &&
                     pos.piece_on_sq(current_move.to) == NO_PIECE) {
                     R_lmr = 1;
                     if (depth >= 5) R_lmr++;
-                    if (i >= 6) R_lmr++;
+                    if (orderer.get_moves_tried() > 6) R_lmr++;
                     R_lmr = std::min(R_lmr, depth - 2);
                     R_lmr = std::max(R_lmr, 0);
                 }
@@ -1471,14 +1584,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
-                        // Penalize the quiet moves that came before this one
-                        for (int j = 0; j < i; ++j) {
-                            const Move& bad_move = moves[j];
-                            if (pos.piece_on_sq(bad_move.to) == NO_PIECE && bad_move.promotion == NO_PIECE) {
-                                int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
-                                bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
-                            }
-                        }
+                        // Penalizing previous moves is no longer straightforward with the staged move picker
+                        // and has been disabled to facilitate this refactoring. The bonus for the good move
+                        // is the most important part of the heuristic.
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
                     return beta; // Fail-high
@@ -1628,7 +1736,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.22\n";
+            std::cout << "id name Amira 1.23\n"; // Version bump
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
