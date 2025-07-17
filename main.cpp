@@ -21,6 +21,7 @@ enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 256;
+constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
@@ -44,11 +45,36 @@ const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,
 // Forward Declarations
 struct Move;
 struct Position;
-int evaluate(const Position& pos);
+int evaluate(Position& pos); // Made non-const to update pawn cache stats
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
+uint64_t calculate_pawn_zobrist_hash(const Position& pos);
+
+// --- Pawn Cache ---
+struct PawnCacheEntry {
+    uint64_t key = 0;
+    int mg_score = 0;
+    int eg_score = 0;
+    uint64_t white_passed_pawns = 0;
+    uint64_t black_passed_pawns = 0;
+};
+
+std::vector<PawnCacheEntry> pawn_evaluation_cache;
+uint64_t pawn_cache_mask = 0;
+
+void init_pawn_cache() {
+    pawn_evaluation_cache.assign(PAWN_CACHE_SIZE_ENTRIES, PawnCacheEntry());
+    pawn_cache_mask = PAWN_CACHE_SIZE_ENTRIES - 1;
+}
+
+void clear_pawn_cache() {
+     if (!pawn_evaluation_cache.empty()) {
+        std::memset(pawn_evaluation_cache.data(), 0, pawn_evaluation_cache.size() * sizeof(PawnCacheEntry));
+    }
+}
+
 
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
@@ -143,6 +169,7 @@ struct Position {
     int ep_square;
     uint8_t castling_rights;
     uint64_t zobrist_hash;
+    uint64_t pawn_zobrist_key; // For pawn cache
     int halfmove_clock;
     int fullmove_number;
     int ply;
@@ -389,6 +416,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) return pos; // Tried to capture own piece
 
     next_pos.zobrist_hash = pos.zobrist_hash;
+    next_pos.pawn_zobrist_key = pos.pawn_zobrist_key;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
 
     next_pos.piece_bb[piece_moved] &= ~from_bb;
@@ -400,15 +428,22 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.piece_bb[piece_captured] &= ~to_bb;
         next_pos.color_bb[opp] &= ~to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[opp][piece_captured][move.to];
+        if(piece_captured == PAWN) {
+            next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][move.to];
+        }
         next_pos.halfmove_clock = 0;
     }
-    if (piece_moved == PAWN) next_pos.halfmove_clock = 0;
+    if (piece_moved == PAWN) {
+        next_pos.halfmove_clock = 0;
+        next_pos.pawn_zobrist_key ^= zobrist_pieces[stm][PAWN][move.from];
+    }
 
     if (piece_moved == PAWN && move.to == pos.ep_square && pos.ep_square != -1) {
         int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
         next_pos.piece_bb[PAWN] &= ~set_bit(captured_pawn_sq);
         next_pos.color_bb[opp] &= ~set_bit(captured_pawn_sq);
         next_pos.zobrist_hash ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
+        next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
     }
 
     next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
@@ -422,11 +457,15 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         if (piece_moved != PAWN) return pos; // Invalid promotion
         int promotion_rank_actual = (stm == WHITE) ? 7 : 0; // Actual rank where pawn lands for promotion
         if (move.to / 8 != promotion_rank_actual) return pos; // Invalid promotion square
-
+        
+        // The moving pawn doesn't get added back to the pawn key.
         next_pos.piece_bb[move.promotion] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
     } else {
+        if (piece_moved == PAWN) {
+             next_pos.pawn_zobrist_key ^= zobrist_pieces[stm][PAWN][move.to];
+        }
         next_pos.piece_bb[piece_moved] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
@@ -660,13 +699,119 @@ bool is_insufficient_material(const Position& pos) {
     return false;
 }
 
-int evaluate(const Position& pos) {
+// Helper function to evaluate pawn structure for one color
+void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
+                                       int& mg_pawn_score, int& eg_pawn_score,
+                                       uint64_t& passed_pawns) {
+    uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
+    uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
+    uint64_t temp_pawns = all_friendly_pawns;
+    
+    uint64_t enemy_pawn_attacks = 0;
+    uint64_t temp_enemy_pawns = all_enemy_pawns;
+    while(temp_enemy_pawns) {
+        int pawn_sq = lsb_index(temp_enemy_pawns);
+        enemy_pawn_attacks |= pawn_attacks_bb[1 - current_eval_color][pawn_sq];
+        temp_enemy_pawns &= temp_enemy_pawns - 1;
+    }
+
+    while (temp_pawns) {
+        int sq = lsb_index(temp_pawns);
+        temp_pawns &= temp_pawns - 1;
+        int f = sq % 8;
+
+        // Isolated Pawn Evaluation
+        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
+            mg_pawn_score += isolated_pawn_penalty_mg;
+            eg_pawn_score += isolated_pawn_penalty_eg;
+        }
+
+        // Protected Pawn Evaluation
+        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
+            mg_pawn_score += protected_pawn_bonus_mg;
+            eg_pawn_score += protected_pawn_bonus_eg;
+        }
+
+        // Connected Pawn (Phalanx) Bonus
+        if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
+            mg_pawn_score += PAWN_CONNECTED_BONUS_MG;
+            eg_pawn_score += PAWN_CONNECTED_BONUS_EG;
+        }
+        
+        // Doubled Pawn Evaluation
+        uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
+        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
+                mg_pawn_score += doubled_pawn_liability_mg;
+                eg_pawn_score += doubled_pawn_liability_eg;
+        }
+        
+        // Backward Pawn Evaluation
+        uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
+        uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
+        if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
+            int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
+            if (get_bit(enemy_pawn_attacks, push_sq)) {
+                mg_pawn_score += hindered_pawn_penalty_mg;
+                eg_pawn_score += hindered_pawn_penalty_eg;
+            }
+        }
+
+        // Passed Pawn Detection
+        bool is_passed = false;
+        if (current_eval_color == WHITE) {
+            if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
+        } else {
+            if ((black_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
+        }
+        if (is_passed) {
+            passed_pawns |= set_bit(sq);
+            int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
+            mg_pawn_score += passed_pawn_bonus_mg[rank_from_own_side];
+            eg_pawn_score += passed_pawn_bonus_eg[rank_from_own_side];
+        }
+    }
+}
+
+int evaluate(Position& pos) {
     // Check for insufficient material draw at the beginning of evaluation.
     if (is_insufficient_material(pos)) return 0; // Draw score
 
     int mg_score = 0, eg_score = 0, game_phase = 0;
     int mg_mobility_score = 0, eg_mobility_score = 0;
     
+    // --- Pawn Evaluation (with Caching) ---
+    int mg_pawn_score = 0;
+    int eg_pawn_score = 0;
+    uint64_t white_passed_pawns = 0;
+    uint64_t black_passed_pawns = 0;
+
+    PawnCacheEntry& pawn_entry = pawn_evaluation_cache[pos.pawn_zobrist_key & pawn_cache_mask];
+    if (pawn_entry.key == pos.pawn_zobrist_key) {
+        // Cache hit
+        mg_pawn_score = pawn_entry.mg_score;
+        eg_pawn_score = pawn_entry.eg_score;
+        white_passed_pawns = pawn_entry.white_passed_pawns;
+        black_passed_pawns = pawn_entry.black_passed_pawns;
+    } else {
+        // Cache miss: evaluate and store
+        int white_mg = 0, white_eg = 0;
+        int black_mg = 0, black_eg = 0;
+        evaluate_pawn_structure_for_color(pos, WHITE, white_mg, white_eg, white_passed_pawns);
+        evaluate_pawn_structure_for_color(pos, BLACK, black_mg, black_eg, black_passed_pawns);
+        
+        mg_pawn_score = white_mg - black_mg;
+        eg_pawn_score = white_eg - black_eg;
+        
+        pawn_entry.key = pos.pawn_zobrist_key;
+        pawn_entry.mg_score = mg_pawn_score;
+        pawn_entry.eg_score = eg_pawn_score;
+        pawn_entry.white_passed_pawns = white_passed_pawns;
+        pawn_entry.black_passed_pawns = black_passed_pawns;
+    }
+    mg_score += mg_pawn_score;
+    eg_score += eg_pawn_score;
+    // --- End of Pawn Evaluation ---
+
     // Attack bitboards for threat evaluation
     uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
 
@@ -682,14 +827,7 @@ int evaluate(const Position& pos) {
         uint64_t occupied = pos.get_occupied_bb();
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
-        uint64_t enemy_pawn_attacks = 0;
-        uint64_t temp_enemy_pawns = all_enemy_pawns;
-        while(temp_enemy_pawns) {
-            int pawn_sq = lsb_index(temp_enemy_pawns);
-            enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
-            temp_enemy_pawns &= temp_enemy_pawns - 1;
-        }
-
+        
         // Material, PST, and Feature Evaluation
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
@@ -703,55 +841,8 @@ int evaluate(const Position& pos) {
                 eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
 
                 if ((Piece)p == PAWN) {
-                    int f = sq % 8;
-                    // Isolated Pawn Evaluation
-                    if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
-                        mg_score += side_multiplier * isolated_pawn_penalty_mg;
-                        eg_score += side_multiplier * isolated_pawn_penalty_eg;
-                    }
-
-                    // Protected Pawn Evaluation
-                    if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
-                        mg_score += side_multiplier * protected_pawn_bonus_mg;
-                        eg_score += side_multiplier * protected_pawn_bonus_eg;
-                    }
-
-                    // Connected Pawn (Phalanx) Bonus
-                    if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
-                        mg_score += side_multiplier * PAWN_CONNECTED_BONUS_MG;
-                        eg_score += side_multiplier * PAWN_CONNECTED_BONUS_EG;
-                    }
-                    
-                    // Doubled Pawn Evaluation
-                    uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
-                    if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
-                         mg_score += side_multiplier * doubled_pawn_liability_mg;
-                         eg_score += side_multiplier * doubled_pawn_liability_eg;
-                    }
-                    
-                    // Backward Pawn Evaluation
-                    uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
-                    uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
-                    if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
-                        int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
-                        if (get_bit(enemy_pawn_attacks, push_sq)) {
-                           mg_score += side_multiplier * hindered_pawn_penalty_mg;
-                           eg_score += side_multiplier * hindered_pawn_penalty_eg;
-                        }
-                    }
-
-                    // Passed Pawn Evaluation
-                    bool is_passed = false;
-                    if (current_eval_color == WHITE) {
-                        if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
-                    } else {
-                        if ((black_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
-                    }
-                    if (is_passed) {
-                        int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-                        mg_score += side_multiplier * passed_pawn_bonus_mg[rank_from_own_side];
-                        eg_score += side_multiplier * passed_pawn_bonus_eg[rank_from_own_side];
-                        
+                    uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
+                    if (get_bit(current_passed_pawns, sq)) {
                         // Passed Pawn distance to enemy king
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
                         if (enemy_king_sq != -1) {
@@ -790,6 +881,14 @@ int evaluate(const Position& pos) {
                     mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
                     
+                    uint64_t enemy_pawn_attacks = 0;
+                    uint64_t temp_enemy_pawns = all_enemy_pawns;
+                    while(temp_enemy_pawns) {
+                        int pawn_sq = lsb_index(temp_enemy_pawns);
+                        enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
+                        temp_enemy_pawns &= temp_enemy_pawns - 1;
+                    }
+                    
                     // Knight Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
@@ -821,6 +920,14 @@ int evaluate(const Position& pos) {
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
+                    
+                    uint64_t enemy_pawn_attacks = 0;
+                    uint64_t temp_enemy_pawns = all_enemy_pawns;
+                    while(temp_enemy_pawns) {
+                        int pawn_sq = lsb_index(temp_enemy_pawns);
+                        enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
+                        temp_enemy_pawns &= temp_enemy_pawns - 1;
+                    }
                     
                     // Bishop Outpost Bonus
                     int rank = sq / 8;
@@ -1393,6 +1500,19 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 Position uci_root_pos;
 Move uci_best_move_overall;
 
+uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
+    uint64_t h = 0;
+    for (int c = 0; c < 2; ++c) {
+        uint64_t b = pos.piece_bb[PAWN] & pos.color_bb[c];
+        while (b) {
+            int sq = lsb_index(b);
+            b &= b - 1;
+            h ^= zobrist_pieces[c][PAWN][sq];
+        }
+    }
+    return h;
+}
+
 void parse_fen(Position& pos, const std::string& fen_str) {
     pos = Position(); // Reset position object
     std::stringstream ss(fen_str);
@@ -1455,6 +1575,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
 
     pos.ply = 0; // Ply at root is 0
     pos.zobrist_hash = calculate_zobrist_hash(pos);
+    pos.pawn_zobrist_key = calculate_pawn_zobrist_hash(pos);
     game_history_length = 0;
 }
 
@@ -1507,7 +1628,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.21\n";
+            std::cout << "id name Amira 1.22\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1542,6 +1663,7 @@ void uci_loop() {
             } else {
                  clear_tt();
             }
+            clear_pawn_cache();
             reset_killers_and_history();
             game_history_length = 0;
         } else if (token == "position") {
@@ -1766,6 +1888,7 @@ int main(int argc, char* argv[]) {
     init_zobrist();
     init_attack_tables();
     init_eval_masks();
+    init_pawn_cache();
     reset_killers_and_history();
 
     uci_loop();
