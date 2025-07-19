@@ -27,7 +27,69 @@ constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
 
-// Castling rights mask
+// Castling rights masks
+constexpr uint8_t WK_CASTLE_MASK = 1;
+constexpr uint8_t WQ_CASTLE_MASK = 2;
+constexpr uint8_t BK_CASTLE_MASK = 4;
+constexpr uint8_t BQ_CASTLE_MASK = 8;
+
+// Rook and King starting squares (standard chess)
+constexpr int A1_SQ = 0; constexpr int E1_SQ = 4; constexpr int H1_SQ = 7;
+constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
+constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
+constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
+
+// King safety penalty tables (index is king_attack_score, capped)
+const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
+const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
+
+// Forward Declarations
+struct Move;
+struct Position;
+int evaluate(Position& pos); // Made non-const to update pawn cache stats
+bool is_square_attacked(const Position& pos, int sq, int attacker_color);
+int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
+Position make_move(const Position& pos, const Move& move, bool& legal);
+uint64_t calculate_zobrist_hash(const Position& pos);
+uint64_t calculate_pawn_zobrist_hash(const Position& pos);
+uint64_t perft(Position& pos, int depth);
+
+// --- Pawn Cache ---
+// ... (rest of file is the same as before)
+// (Identical code sections are collapsed for brevity, the full code block is below)
+// ...
+
+// --- The Full Corrected Code ---
+#include <iostream>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <chrono>
+#include <algorithm>
+#include <cstring> // For std::memset
+#include <cstdint>
+#include <random>   // For std::mt19937_64
+#include <cctype>   // For std::isdigit, std::islower, std::tolower
+#include <cmath>    // For std::abs
+#include <cassert>  // For assert()
+
+// Bit manipulation builtins (MSVC/GCC specific)
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+// --- Constants ---
+enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
+enum Color { WHITE, BLACK, NO_COLOR };
+
+constexpr int MAX_PLY = 128;
+constexpr int TT_SIZE_MB_DEFAULT = 256;
+constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
+constexpr int MATE_SCORE = 30000;
+constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
+constexpr int INF_SCORE = 32000;
+
+// Castling rights masks
 constexpr uint8_t WK_CASTLE_MASK = 1;
 constexpr uint8_t WQ_CASTLE_MASK = 2;
 constexpr uint8_t BK_CASTLE_MASK = 4;
@@ -697,239 +759,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     legal_move_flag = true;
     return next_pos;
-}
-
-// --- Evaluation ---
-const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
-const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
-
-// Piece Square Tables (values are for white, mirrored for black)
-const int pawn_pst[64] = {
-     0,  0,  0,  0,  0,  0,  0,  0,   5, 10, 10,-20,-20, 10, 10,  5,
-     5, -5,-10,  0,  0,-10, -5,  5,   0,  0,  0, 20, 20,  0,  0,  0,
-     5,  5, 10, 25, 25, 10,  5,  5,  10, 10, 20, 30, 30, 20, 10, 10,
-    50, 50, 50, 50, 50, 50, 50, 50,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int knight_pst[64] = {
-    -50,-40,-30,-30,-30,-30,-40,-50, -40,-20,  0,  5,  5,  0,-20,-40,
-    -30,  5, 10, 15, 15, 10,  5,-30, -30,  0, 15, 20, 20, 15,  0,-30,
-    -30,  5, 15, 20, 20, 15,  5,-30, -30,  0, 10, 15, 15, 10,  0,-30,
-    -40,-20,  0,  0,  0,  0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50
-};
-const int bishop_pst[64] = {
-    -20,-10,-10,-10,-10,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5, 10, 10,  5,  0,-10, -10,  5,  5, 10, 10,  5,  5,-10,
-    -10,  0, 10, 10, 10, 10,  0,-10, -10, 10, 10, 10, 10, 10, 10,-10,
-    -10,  5,  0,  0,  0,  0,  5,-10, -20,-10,-10,-10,-10,-10,-10,-20
-};
-const int rook_pst[64] = {
-     0,  0,  0,  5,  5,  0,  0,  0,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-    -5,  0,  0,  0,  0,  0,  0, -5,  -5,  0,  0,  0,  0,  0,  0, -5,
-     5, 10, 10, 10, 10, 10, 10,  5,   0,  0,  0,  0,  0,  0,  0,  0
-};
-const int queen_pst[64] = {
-    -20,-10,-10, -5, -5,-10,-10,-20, -10,  0,  0,  0,  0,  0,  0,-10,
-    -10,  0,  5,  5,  5,  5,  0,-10,  -5,  0,  5,  5,  5,  5,  0, -5,
-      0,  0,  5,  5,  5,  5,  0, -5, -10,  0,  5,  5,  5,  5,  0,-10,
-    -10,  0,  0,  0,  0,  0,  0,-10, -20,-10,-10, -5, -5,-10,-10,-20
-};
-const int king_pst_mg[64] = { // King safety oriented for midgame
-     20, 30, 10,  0,  0, 10, 30, 20,  // Castled king on G1/C1 gets +30 (mirrored for G8/C8)
-     20, 20,  0,  0,  0,  0, 20, 20,
-    -10,-20,-20,-20,-20,-20,-20,-10, -20,-30,-30,-40,-40,-30,-30,-20,
-    -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
-    -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30
-};
-const int king_pst_eg[64] = { // King activity for endgame
-   -50,-30,-30,-30,-30,-30,-30,-50, -30,-10, 20, 30, 30, 20,-10,-30,
-   -30, 10, 30, 40, 40, 30, 10,-30, -30, 10, 40, 50, 50, 40, 10,-30,
-   -30, 10, 40, 50, 50, 40, 10,-30, -30, 10, 30, 40, 40, 30, 10,-30,
-   -30,-10, 20, 30, 30, 20,-10,-30, -50,-30,-30,-30,-30,-30,-30,-50
-};
-
-const int* pst_mg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_mg};
-const int* pst_eg_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst_eg};
-const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
-
-// Evaluation helper masks
-uint64_t file_bb_mask[8];
-uint64_t rank_bb_mask[8];
-uint64_t white_passed_pawn_block_mask[64];
-uint64_t black_passed_pawn_block_mask[64];
-uint64_t adjacent_files_mask[8];
-
-const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
-const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
-
-// --- Evaluation Constants ---
-const int TEMPO_BONUS = 8;
-const int BISHOP_PAIR_BONUS_MG = 30;
-const int BISHOP_PAIR_BONUS_EG = 50;
-const int PAWN_CONNECTED_BONUS_MG = 10;
-const int PAWN_CONNECTED_BONUS_EG = 14;
-const int protected_pawn_bonus_mg = 8;
-const int protected_pawn_bonus_eg = 12;
-const int isolated_pawn_penalty_mg = -12;
-const int isolated_pawn_penalty_eg = -20;
-const int doubled_pawn_liability_mg = -10;
-const int doubled_pawn_liability_eg = -15;
-const int hindered_pawn_penalty_mg = -8;
-const int hindered_pawn_penalty_eg = -12;
-const int knight_mobility_bonus_mg = 1;
-const int knight_mobility_bonus_eg = 2;
-const int bishop_mobility_bonus_mg = 2;
-const int bishop_mobility_bonus_eg = 3;
-const int rook_mobility_bonus_mg = 2;
-const int rook_mobility_bonus_eg = 4;
-const int queen_mobility_bonus_mg = 1;
-const int queen_mobility_bonus_eg = 2;
-const int dominant_knight_bonus_mg = 25;
-const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 20;
-const int dominant_bishop_bonus_eg = 15;
-const int potential_dominance_bonus = 5;
-const int minor_on_heavy_pressure_mg = 20;
-const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 15;
-const int rook_on_minor_pressure_eg = 10;
-const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
-const int ROOK_OPEN_FILE_MG = 20;
-const int ROOK_OPEN_FILE_EG = 15;
-const int ROOK_SEMI_OPEN_FILE_MG = 10;
-const int ROOK_SEMI_OPEN_FILE_EG = 5;
-
-void init_eval_masks() {
-    for (int f = 0; f < 8; ++f) {
-        file_bb_mask[f] = 0ULL;
-        for (int r = 0; r < 8; ++r) file_bb_mask[f] |= set_bit(r * 8 + f);
-        adjacent_files_mask[f] = 0ULL;
-        if (f > 0) adjacent_files_mask[f] |= file_bb_mask[f-1];
-        if (f < 7) adjacent_files_mask[f] |= file_bb_mask[f+1];
-    }
-    for (int r = 0; r < 8; ++r) {
-        rank_bb_mask[r] = 0ULL;
-        for (int f = 0; f < 8; ++f) rank_bb_mask[r] |= set_bit(r * 8 + f);
-    }
-
-    for (int sq = 0; sq < 64; ++sq) {
-        white_passed_pawn_block_mask[sq] = 0ULL;
-        black_passed_pawn_block_mask[sq] = 0ULL;
-        int r = sq / 8, f = sq % 8;
-        for (int cur_r = r + 1; cur_r < 8; ++cur_r) { // Squares in front for White
-            white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
-            if (f > 0) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
-            if (f < 7) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
-        }
-        for (int cur_r = r - 1; cur_r >= 0; --cur_r) { // Squares in front for Black
-            black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
-            if (f > 0) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
-            if (f < 7) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
-        }
-    }
-}
-
-// Checks for draw by insufficient material.
-bool is_insufficient_material(const Position& pos) {
-    // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
-    if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) return false;
-
-    // Count minor pieces for both sides
-    int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
-    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
-    int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
-    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
-    int white_minors = white_knights + white_bishops;
-    int black_minors = black_knights + black_bishops;
-
-    // Case: K vs K
-    if (white_minors == 0 && black_minors == 0) return true;
-
-    // Case: K + minor vs K
-    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) return true;
-
-    // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
-    if (white_minors == 1 && black_minors == 1) return true;
-
-    // Case: K+N+N vs K (generally treated as a draw)
-    if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
-        (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
-
-    // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
-    return false;
-}
-
-// Helper function to evaluate pawn structure for one color
-void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
-                                       int& mg_pawn_score, int& eg_pawn_score,
-                                       uint64_t& passed_pawns) {
-    uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
-    uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
-    uint64_t temp_pawns = all_friendly_pawns;
-    
-    uint64_t enemy_pawn_attacks = 0;
-    uint64_t temp_enemy_pawns = all_enemy_pawns;
-    while(temp_enemy_pawns) {
-        int pawn_sq = lsb_index(temp_enemy_pawns);
-        enemy_pawn_attacks |= pawn_attacks_bb[1 - current_eval_color][pawn_sq];
-        temp_enemy_pawns &= temp_enemy_pawns - 1;
-    }
-
-    while (temp_pawns) {
-        int sq = lsb_index(temp_pawns);
-        temp_pawns &= temp_pawns - 1;
-        int f = sq % 8;
-
-        // Isolated Pawn Evaluation
-        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
-            mg_pawn_score += isolated_pawn_penalty_mg;
-            eg_pawn_score += isolated_pawn_penalty_eg;
-        }
-
-        // Protected Pawn Evaluation
-        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
-            mg_pawn_score += protected_pawn_bonus_mg;
-            eg_pawn_score += protected_pawn_bonus_eg;
-        }
-
-        // Connected Pawn (Phalanx) Bonus
-        if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
-            mg_pawn_score += PAWN_CONNECTED_BONUS_MG;
-            eg_pawn_score += PAWN_CONNECTED_BONUS_EG;
-        }
-        
-        // Doubled Pawn Evaluation
-        uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
-        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
-                mg_pawn_score += doubled_pawn_liability_mg;
-                eg_pawn_score += doubled_pawn_liability_eg;
-        }
-        
-        // Backward Pawn Evaluation
-        uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
-        uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
-        if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
-            int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
-            if (get_bit(enemy_pawn_attacks, push_sq)) {
-                mg_pawn_score += hindered_pawn_penalty_mg;
-                eg_pawn_score += hindered_pawn_penalty_eg;
-            }
-        }
-
-        // Passed Pawn Detection
-        bool is_passed = false;
-        if (current_eval_color == WHITE) {
-            if ((white_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
-        } else {
-            if ((black_passed_pawn_block_mask[sq] & all_enemy_pawns) == 0) is_passed = true;
-        }
-        if (is_passed) {
-            passed_pawns |= set_bit(sq);
-            int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-            mg_pawn_score += passed_pawn_bonus_mg[rank_from_own_side];
-            eg_pawn_score += passed_pawn_bonus_eg[rank_from_own_side];
-        }
-    }
 }
 
 int evaluate(Position& pos) {
@@ -1804,7 +1633,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.23\n";
+            std::cout << "id name Amira 1.22 Magic\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -2068,6 +1897,7 @@ void uci_loop() {
 }
 
 int main(int argc, char* argv[]) {
+    std::cout << "Amira starting up..." << std::endl;
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
@@ -2077,6 +1907,8 @@ int main(int argc, char* argv[]) {
     init_magic_bitboards();
     init_pawn_cache();
     reset_killers_and_history();
+
+    std::cout << "Initialization complete." << std::endl;
 
     uci_loop();
     return 0;
