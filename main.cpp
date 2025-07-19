@@ -51,6 +51,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 uint64_t calculate_pawn_zobrist_hash(const Position& pos);
+uint64_t perft(Position& pos, int depth);
 
 // --- Pawn Cache ---
 struct PawnCacheEntry {
@@ -387,13 +388,15 @@ void init_magic_bitboards() {
 
 
 inline uint64_t get_rook_attacks(int sq, uint64_t occupied) {
-    // For now, this does nothing. It will use magic bitboards later.
-    return 0ULL;
+    uint64_t blockers = occupied & rook_magics[sq].mask;
+    int index = (blockers * rook_magics[sq].magic) >> (64 - rook_magics[sq].shift);
+    return rook_magics[sq].attacks[index];
 }
 
 inline uint64_t get_bishop_attacks(int sq, uint64_t occupied) {
-    // For now, this does nothing. It will use magic bitboards later.
-    return 0ULL;
+    uint64_t blockers = occupied & bishop_magics[sq].mask;
+    int index = (blockers * bishop_magics[sq].magic) >> (64 - bishop_magics[sq].shift);
+    return bishop_magics[sq].attacks[index];
 }
 
 
@@ -415,46 +418,10 @@ void init_attack_tables() {
     }
 }
 
-// --- Slider Attack Generation ---
-uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
-    uint64_t attacks = 0;
-    const int deltas[] = {1, -1, 8, -8}; // E, W, N, S
-    for (int d : deltas) {
-        for (int s = sq + d; ; s += d) {
-            if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8; // (s-d) is original square
-            if (std::abs(d) == 1 && r_curr != r_prev) break; // Horizontal wrap-around
-            if (std::abs(d) == 8 && c_curr != c_prev) break; // Vertical wrap-around
-
-            attacks |= set_bit(s);
-            if (get_bit(occupied, s)) break;
-        }
-    }
-    return attacks;
-}
-
-uint64_t get_bishop_attacks_from_sq(int sq, uint64_t occupied) {
-    uint64_t attacks = 0;
-    const int deltas[] = {9, -9, 7, -7}; // NE, SW, NW, SE
-    for (int d : deltas) {
-        for (int s = sq + d; ; s += d) {
-            if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
-            if (std::abs(r_curr - r_prev) != 1 || std::abs(c_curr - c_prev) != 1) break; // Diagonal wrap-around
-
-            attacks |= set_bit(s);
-            if (get_bit(occupied, s)) break;
-        }
-    }
-    return attacks;
-}
-
 uint64_t get_slider_attacks_for_movegen(int sq, Piece piece_type, uint64_t occupied) {
-    if (piece_type == ROOK) return get_rook_attacks_from_sq(sq, occupied);
-    if (piece_type == BISHOP) return get_bishop_attacks_from_sq(sq, occupied);
-    if (piece_type == QUEEN) return get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
+    if (piece_type == ROOK) return get_rook_attacks(sq, occupied);
+    if (piece_type == BISHOP) return get_bishop_attacks(sq, occupied);
+    if (piece_type == QUEEN) return get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
     return 0; // Should not happen
 }
 
@@ -472,18 +439,14 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     uint64_t occupied = pos.get_occupied_bb();
 
     uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_rook_attacks_from_sq(sq_to_check, occupied) & rook_queen_attackers) return true;
+    if (get_rook_attacks(sq_to_check, occupied) & rook_queen_attackers) return true;
 
     uint64_t bishop_queen_attackers = (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_bishop_attacks_from_sq(sq_to_check, occupied) & bishop_queen_attackers) return true;
+    if (get_bishop_attacks(sq_to_check, occupied) & bishop_queen_attackers) return true;
 
     return false;
 }
 
-// --- Move Generation --- //
-// ... (rest of the file is unchanged) ...
-// The rest of the file from here down is identical to the previous version,
-// so it is omitted for brevity. You can copy it from your existing file.
 // --- Move Generation --- //
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     int move_count = 0;
@@ -1062,7 +1025,7 @@ int evaluate(Position& pos) {
                         } 
                     }
                     // Rook Mobility
-                    uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
@@ -1110,7 +1073,7 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == BISHOP) {
-                    uint64_t mobility_attacks = get_bishop_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
@@ -1136,7 +1099,7 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == QUEEN) {
-                    uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_mg;
@@ -1256,18 +1219,18 @@ int evaluate(Position& pos) {
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_player_pieces;
             while(enemy_bishops) {
                 int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
+                if (get_bishop_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
             }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_player_pieces;
             while(enemy_rooks) {
                 int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
+                if (get_rook_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
             }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_player_pieces;
             while(enemy_queens) {
                 int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
+                if (get_bishop_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
+                if (get_rook_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
             }
             uint64_t temp_king_zone_for_pawns = king_1_ring_zone;
             while(temp_king_zone_for_pawns) {
@@ -1691,6 +1654,22 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     return best_score;
 }
 
+uint64_t perft(Position& pos, int depth) {
+    if (depth == 0) return 1ULL;
+    Move moves[256];
+    int num_moves = generate_moves(pos, moves, false);
+    uint64_t nodes = 0;
+
+    for (int i = 0; i < num_moves; i++) {
+        bool legal;
+        Position next_pos = make_move(pos, moves[i], legal);
+        if (legal) {
+            nodes += perft(next_pos, depth - 1);
+        }
+    }
+    return nodes;
+}
+
 // --- UCI ---
 Position uci_root_pos;
 Move uci_best_move_overall;
@@ -2068,7 +2047,17 @@ void uci_loop() {
                      std::cout << "bestmove 0000\n" << std::flush;
                 }
             }
-
+        } else if (token == "perft") {
+            int depth = 5;
+            ss >> depth;
+            auto start_time = std::chrono::steady_clock::now();
+            uint64_t nodes = perft(uci_root_pos, depth);
+            auto end_time = std::chrono::steady_clock::now();
+            auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+            std::cout << "Perft " << depth << " nodes " << nodes << " time " << duration_ms << "ms" << std::endl;
+            if (duration_ms > 0) {
+                std::cout << "NPS: " << (nodes * 1000 / duration_ms) << std::endl;
+            }
         } else if (token == "quit" || token == "stop") {
             stop_search_flag = true;
             if (token == "quit") break;
