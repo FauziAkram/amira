@@ -265,7 +265,6 @@ uint64_t generate_bishop_attacks_slowly(int sq, uint64_t occupied) {
     return attacks;
 }
 
-
 // ============================================================================
 // ++ MAGIC BITBOARD DATA AND INITIALIZATION ++
 // ============================================================================
@@ -297,7 +296,7 @@ const uint64_t rook_masks[64] = {
     0x0001017E01010100ULL, 0x0002027C02020200ULL, 0x0004047A04040400ULL, 0x0008087608080800ULL, 0x0010106E10101000ULL, 0x0020205E20202000ULL, 0x0040403E40404000ULL, 0x0080807E80808000ULL,
     0x00017E0101010100ULL, 0x00027C0202020200ULL, 0x00047A0404040400ULL, 0x0008760808080800ULL, 0x00106E1010101000ULL, 0x00205E2020202000ULL, 0x00403E4040404000ULL, 0x00807E8080808000ULL,
     0x007E010101010100ULL, 0x007C020202020200ULL, 0x007A040404040400ULL, 0x0076080808080800ULL, 0x006E101010101000ULL, 0x005E202020202000ULL, 0x003E404040404000ULL, 0x007E808080808000ULL,
-    0x7E01010101010100ULL, 0x7C02020202020200ULL, 0x7A04040404040400ULL, 0x7608080808080800ULL, 0x6E10101010101000ULL, 0x5E20202020202000ULL, 0x3E40404040404000ULL, 0x7E80808080808000ULL,
+    0x7E01010101010100ULL, 0x7C020202020200ULL, 0x7A04040404040400ULL, 0x7608080808080800ULL, 0x6E10101010101000ULL, 0x5E20202020202000ULL, 0x3E40404040404000ULL, 0x7E80808080808000ULL,
 };
 const int rook_shifts[64] = {
     52, 53, 53, 53, 53, 53, 53, 52,
@@ -368,16 +367,16 @@ std::array<uint64_t, 0x1480> BishopAttacks;
 Magic RookMagics[64];
 Magic BishopMagics[64];
 
-// This helper function populates the attack table for a given piece type.
-void init_magics(Piece piece_type, Magic magics[64], std::array<uint64_t, 0x19000>& attacks_table_storage) {
+// This helper function populates the attack table for rooks.
+void init_magics(Magic magics[64], std::array<uint64_t, 0x19000>& attacks_table_storage) {
 
     uint64_t* current_attacks_ptr = attacks_table_storage.data();
 
     for (int sq = 0; sq < 64; ++sq) {
         
-        magics[sq].mask = (piece_type == ROOK) ? rook_masks[sq] : bishop_masks[sq];
-        magics[sq].magic = (piece_type == ROOK) ? rook_magics[sq] : bishop_magics[sq];
-        magics[sq].shift = (piece_type == ROOK) ? rook_shifts[sq] : bishop_shifts[sq];
+        magics[sq].mask = rook_masks[sq];
+        magics[sq].magic = rook_magics[sq];
+        magics[sq].shift = rook_shifts[sq];
         magics[sq].attacks = current_attacks_ptr;
 
         uint64_t mask = magics[sq].mask;
@@ -388,8 +387,6 @@ void init_magics(Piece piece_type, Magic magics[64], std::array<uint64_t, 0x1900
             uint64_t occupancy = 0;
             uint64_t temp_mask = mask;
             
-            // This loop maps the bits from `i` to the set bits in `mask`
-            // to generate every possible blocker combination.
             for (int j = 0; j < num_mask_bits; ++j) {
                 int lsb_idx = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
@@ -399,25 +396,54 @@ void init_magics(Piece piece_type, Magic magics[64], std::array<uint64_t, 0x1900
             }
 
             int magic_index = (occupancy * magics[sq].magic) >> magics[sq].shift;
-
-            if (piece_type == ROOK) {
-                magics[sq].attacks[magic_index] = generate_rook_attacks_slowly(sq, occupancy);
-            } else { // BISHOP
-                magics[sq].attacks[magic_index] = generate_bishop_attacks_slowly(sq, occupancy);
-            }
+            magics[sq].attacks[magic_index] = generate_rook_attacks_slowly(sq, occupancy);
         }
 
-        // Advance the pointer for the next square's attack table.
         current_attacks_ptr += num_occupancies;
     }
 }
 
+// This is the NEW, bishop-specific helper function.
+void init_bishop_magics(Magic magics[64], std::array<uint64_t, 0x1480>& attacks_table_storage) {
+
+    uint64_t* current_attacks_ptr = attacks_table_storage.data();
+
+    for (int sq = 0; sq < 64; ++sq) {
+        
+        magics[sq].mask = bishop_masks[sq];
+        magics[sq].magic = bishop_magics[sq];
+        magics[sq].shift = bishop_shifts[sq];
+        magics[sq].attacks = current_attacks_ptr;
+
+        uint64_t mask = magics[sq].mask;
+        int num_mask_bits = pop_count(mask);
+        int num_occupancies = 1 << num_mask_bits;
+        
+        for (int i = 0; i < num_occupancies; ++i) {
+            uint64_t occupancy = 0;
+            uint64_t temp_mask = mask;
+            
+            for (int j = 0; j < num_mask_bits; ++j) {
+                int lsb_idx = lsb_index(temp_mask);
+                temp_mask &= temp_mask - 1;
+                if ((i >> j) & 1) {
+                    occupancy |= (1ULL << lsb_idx);
+                }
+            }
+
+            int magic_index = (occupancy * magics[sq].magic) >> magics[sq].shift;
+            magics[sq].attacks[magic_index] = generate_bishop_attacks_slowly(sq, occupancy);
+        }
+
+        current_attacks_ptr += num_occupancies;
+    }
+}
+
+
 // Main initialization function for all magic bitboards.
 void init_magic_bitboards() {
-    // The second template argument for bishop is a dummy size, as it's smaller than rook.
-    // The actual array is passed as the third argument.
-    init_magics(ROOK, RookMagics, RookAttacks);
-    init_magics(BISHOP, BishopMagics, reinterpret_cast<std::array<uint64_t, 0x19000>&>(BishopAttacks));
+    init_magics(RookMagics, RookAttacks);
+    init_bishop_magics(BishopMagics, BishopAttacks);
 }
 
 // ============================================================================
@@ -1959,48 +1985,48 @@ void uci_loop() {
             }
         } else if (token == "go") {
             std::string go_param;
-    ss >> go_param; // Read the next word after "go"
+            ss >> go_param; // Read the next word after "go"
 
-    if (go_param == "perft") {
-        int depth = 0;
-        ss >> depth;
-        if (depth > 0) {
-            std::cout << "Starting perft to depth " << depth << "..." << std::endl;
-            auto perft_start_time = std::chrono::steady_clock::now();
-            
-            Move moves[256];
-            int num_moves = generate_moves(uci_root_pos, moves, false);
-            uint64_t total_nodes = 0;
+            if (go_param == "perft") {
+                int depth = 0;
+                ss >> depth;
+                if (depth > 0) {
+                    std::cout << "Starting perft to depth " << depth << "..." << std::endl;
+                    auto perft_start_time = std::chrono::steady_clock::now();
+                    
+                    Move moves[256];
+                    int num_moves = generate_moves(uci_root_pos, moves, false);
+                    uint64_t total_nodes = 0;
 
-            // Sort moves for consistent output
-            std::sort(moves, moves + num_moves, [](const Move& a, const Move& b) {
-                return move_to_uci(a) < move_to_uci(b);
-            });
+                    // Sort moves for consistent output
+                    std::sort(moves, moves + num_moves, [](const Move& a, const Move& b) {
+                        return move_to_uci(a) < move_to_uci(b);
+                    });
 
-            for (int i = 0; i < num_moves; i++) {
-                bool is_legal;
-                // Use a fresh copy of the root position for each move
-                Position next_pos = make_move(uci_root_pos, moves[i], is_legal); 
-                if (is_legal) {
-                    uint64_t nodes_for_move = perft_driver(next_pos, depth - 1);
-                    total_nodes += nodes_for_move;
-                    std::cout << move_to_uci(moves[i]) << ": " << nodes_for_move << std::endl;
+                    for (int i = 0; i < num_moves; i++) {
+                        bool is_legal;
+                        // Use a fresh copy of the root position for each move
+                        Position next_pos = make_move(uci_root_pos, moves[i], is_legal); 
+                        if (is_legal) {
+                            uint64_t nodes_for_move = perft_driver(next_pos, depth - 1);
+                            total_nodes += nodes_for_move;
+                            std::cout << move_to_uci(moves[i]) << ": " << nodes_for_move << std::endl;
+                        }
+                    }
+
+                    auto perft_end_time = std::chrono::steady_clock::now();
+                    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(perft_end_time - perft_start_time).count();
+                    if (elapsed_ms < 1) elapsed_ms = 1;
+                    uint64_t nps = (total_nodes * 1000) / elapsed_ms;
+
+                    std::cout << "\nNodes searched: " << total_nodes << std::endl;
+                    std::cout << "Time: " << elapsed_ms << " ms, NPS: " << nps << std::endl;
                 }
+                continue; // Skip the rest of the 'go' command logic
             }
-
-            auto perft_end_time = std::chrono::steady_clock::now();
-            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(perft_end_time - perft_start_time).count();
-            if (elapsed_ms < 1) elapsed_ms = 1;
-            uint64_t nps = (total_nodes * 1000) / elapsed_ms;
-
-            std::cout << "\nNodes searched: " << total_nodes << std::endl;
-            std::cout << "Time: " << elapsed_ms << " ms, NPS: " << nps << std::endl;
-        }
-        continue; // Skip the rest of the 'go' command logic
-    }
     
-    // We need to put the parameter back if it wasn't "perft"
-    ss.seekg(-(std::streamoff)go_param.length(), std::ios_base::cur);
+            // We need to put the parameter back if it wasn't "perft"
+            ss.seekg(-(std::streamoff)go_param.length(), std::ios_base::cur);
 
             if (!g_tt_is_initialized) {
                 init_tt(g_configured_tt_size_mb);
