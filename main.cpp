@@ -9,6 +9,7 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::abs
+#include <array>
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -201,6 +202,228 @@ struct Position {
     }
 };
 
+
+// A simple, correct (but slow) implementation for generating rook attacks.
+// This will be used to initialize the magic bitboard attack tables.
+uint64_t generate_rook_attacks_slowly(int sq, uint64_t occupied) {
+    uint64_t attacks = 0ULL;
+    int r, f;
+    int rank = sq / 8;
+    int file = sq % 8;
+
+    // North
+    for (r = rank + 1; r <= 7; ++r) {
+        attacks |= (1ULL << (r * 8 + file));
+        if (occupied & (1ULL << (r * 8 + file))) break;
+    }
+    // South
+    for (r = rank - 1; r >= 0; --r) {
+        attacks |= (1ULL << (r * 8 + file));
+        if (occupied & (1ULL << (r * 8 + file))) break;
+    }
+    // East
+    for (f = file + 1; f <= 7; ++f) {
+        attacks |= (1ULL << (rank * 8 + f));
+        if (occupied & (1ULL << (rank * 8 + f))) break;
+    }
+    // West
+    for (f = file - 1; f >= 0; --f) {
+        attacks |= (1ULL << (rank * 8 + f));
+        if (occupied & (1ULL << (rank * 8 + f))) break;
+    }
+    return attacks;
+}
+
+// A simple, correct (but slow) implementation for generating bishop attacks.
+// This will be used to initialize the magic bitboard attack tables.
+uint64_t generate_bishop_attacks_slowly(int sq, uint64_t occupied) {
+    uint64_t attacks = 0ULL;
+    int r, f;
+    int rank = sq / 8;
+    int file = sq % 8;
+
+    // North-East
+    for (r = rank + 1, f = file + 1; r <= 7 && f <= 7; ++r, ++f) {
+        attacks |= (1ULL << (r * 8 + f));
+        if (occupied & (1ULL << (r * 8 + f))) break;
+    }
+    // South-East
+    for (r = rank - 1, f = file + 1; r >= 0 && f <= 7; --r, ++f) {
+        attacks |= (1ULL << (r * 8 + f));
+        if (occupied & (1ULL << (r * 8 + f))) break;
+    }
+    // South-West
+    for (r = rank - 1, f = file - 1; r >= 0 && f >= 0; --r, --f) {
+        attacks |= (1ULL << (r * 8 + f));
+        if (occupied & (1ULL << (r * 8 + f))) break;
+    }
+    // North-West
+    for (r = rank + 1, f = file - 1; r <= 7 && f >= 0; ++r, --f) {
+        attacks |= (1ULL << (r * 8 + f));
+        if (occupied & (1ULL << (r * 8 + f))) break;
+    }
+    return attacks;
+}
+
+
+// ============================================================================
+// ++ MAGIC BITBOARD DATA AND INITIALIZATION ++
+// ============================================================================
+
+// --- Magic Numbers (ROOK) ---
+const uint64_t rook_magics[64] = {
+  0x8a80104000800020ULL, 0x140002000100040ULL, 0x2801880a0017001ULL, 0x100081001000400ULL,
+  0x200020010080400ULL, 0x3001c0002010008ULL, 0x8480008002000100ULL, 0x2080088004402900ULL,
+  0x800098204000ULL, 0x200200080100200ULL, 0x100044000100100ULL, 0x280001040802101ULL,
+  0x280008000401000ULL, 0x100400080080200ULL, 0x440003000200801ULL, 0x800082002000401ULL,
+  0x8004400000200010ULL, 0x100010002001000ULL, 0x40200010080480ULL, 0x8090010020080ULL,
+  0x40100020010800ULL, 0x80050080408000ULL, 0x10008000200040ULL, 0x2100200040842000ULL,
+  0x100000008002002ULL, 0x4000021010009ULL, 0x80400020001000ULL, 0x200100040080ULL,
+  0x412200000800800ULL, 0x4000028008001000ULL, 0x100000200004000ULL, 0x20004000010008ULL,
+  0x1000000000800200ULL, 0x2000010040000ULL, 0x80000008004001ULL, 0x400000010020004ULL,
+  0x20040000200800ULL, 0x80080040000100ULL, 0x10010000002000ULL, 0x4004000000102800ULL,
+  0x400801001000ULL, 0x8000608102000400ULL, 0x80030000040080ULL, 0x100004040002000ULL,
+  0x4000040100008ULL, 0x800001000080402ULL, 0x800000100002001ULL, 0x20000400801000ULL,
+  0x20000020001001ULL, 0x1000000800402ULL, 0x20000000010400ULL, 0x80000040082000ULL,
+  0x400000004200080ULL, 0x20000800400ULL, 0x41000100002000ULL, 0x80800000010002ULL,
+  0x100200100801000ULL, 0x208010000200040ULL, 0x804008021000ULL, 0x100084000801000ULL,
+  0x200800400002000ULL, 0x400010004002000ULL, 0x800808004000100ULL, 0x10000401004000ULL
+};
+const uint64_t rook_masks[64] = {
+    0x000101010101017EULL, 0x000202020202027CULL, 0x000404040404047AULL, 0x0008080808080876ULL, 0x001010101010106EULL, 0x002020202020205EULL, 0x004040404040403EULL, 0x008080808080807EULL,
+    0x0001010101017E00ULL, 0x0002020202027C00ULL, 0x0004040404047A00ULL, 0x0008080808087600ULL, 0x0010101010106E00ULL, 0x0020202020205E00ULL, 0x0040404040403E00ULL, 0x0080808080807E00ULL,
+    0x00010101017E0100ULL, 0x00020202027C0200ULL, 0x00040404047A0400ULL, 0x0008080808760800ULL, 0x00101010106E1000ULL, 0x00202020205E2000ULL, 0x00404040403E4000ULL, 0x00808080807E8000ULL,
+    0x000101017E010100ULL, 0x000202027C020200ULL, 0x000404047A040400ULL, 0x0008080876080800ULL, 0x001010106E101000ULL, 0x002020205E202000ULL, 0x004040403E404000ULL, 0x008080807E808000ULL,
+    0x0001017E01010100ULL, 0x0002027C02020200ULL, 0x0004047A04040400ULL, 0x0008087608080800ULL, 0x0010106E10101000ULL, 0x0020205E20202000ULL, 0x0040403E40404000ULL, 0x0080807E80808000ULL,
+    0x00017E0101010100ULL, 0x00027C0202020200ULL, 0x00047A0404040400ULL, 0x0008760808080800ULL, 0x00106E1010101000ULL, 0x00205E2020202000ULL, 0x00403E4040404000ULL, 0x00807E8080808000ULL,
+    0x007E010101010100ULL, 0x007C020202020200ULL, 0x007A040404040400ULL, 0x0076080808080800ULL, 0x006E101010101000ULL, 0x005E202020202000ULL, 0x003E404040404000ULL, 0x007E808080808000ULL,
+    0x7E01010101010100ULL, 0x7C02020202020200ULL, 0x7A04040404040400ULL, 0x7608080808080800ULL, 0x6E10101010101000ULL, 0x5E20202020202000ULL, 0x3E40404040404000ULL, 0x7E80808080808000ULL,
+};
+const int rook_shifts[64] = {
+    52, 53, 53, 53, 53, 53, 53, 52,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    53, 54, 54, 54, 54, 54, 54, 53,
+    52, 53, 53, 53, 53, 53, 53, 52,
+};
+
+// --- Magic Numbers (BISHOP) ---
+const uint64_t bishop_magics[64] = {
+  0x40040844404084ULL, 0x2004208a004208ULL, 0x101010101010100ULL, 0x202020202020200ULL,
+  0x40404040404040ULL, 0x80808080808080ULL, 0x40080100200400ULL, 0x2802200100410ULL,
+  0x22010011400800ULL, 0x80102800801010ULL, 0x4004040404040404ULL, 0x2002020202020202ULL,
+  0x1001010101010101ULL, 0x8008080808080808ULL, 0x80108010801010ULL, 0x40004040808200ULL,
+  0x40088044002200ULL, 0x10020020801001ULL, 0x20400040100101ULL, 0x20010010080402ULL,
+  0x10008080200100ULL, 0x80004040808010ULL, 0x40000200010100ULL, 0x4040040002001008ULL,
+  0x21000821004200ULL, 0x1020820080400ULL, 0x40010040080202ULL, 0x80040080400201ULL,
+  0x20000500400100ULL, 0x40000102000400ULL, 0x80000020001000ULL, 0x80004000000802ULL,
+  0x200001000800ULL, 0x8020000102000ULL, 0x1000400000400ULL, 0x4000001A0000200ULL,
+  0x4000000080401ULL, 0x800000200100ULL, 0x100000420000ULL, 0x20000010000800ULL,
+  0x40080000100020ULL, 0x20020000041000ULL, 0x40000000080081ULL, 0x8100000040002ULL,
+  0x800004010400ULL, 0x400002000040ULL, 0x200000001000ULL, 0x800000082000ULL,
+  0x4000000000800ULL, 0x800000001020ULL, 0x400000200004ULL, 0x200000100002ULL,
+  0x100000010000ULL, 0x400000002040ULL, 0x800000000408ULL, 0x400000000010ULL,
+  0x200000000004ULL, 0x100000000002ULL, 0x800000000001ULL, 0x2120000000000ULL,
+  0x10100000000000ULL, 0x4040000000000ULL, 0x2020000000000ULL, 0x40000000000ULL
+};
+const uint64_t bishop_masks[64] = {
+    0x0040201008040200ULL, 0x0000402010080400ULL, 0x0000004020100A00ULL, 0x0000000040221400ULL, 0x0000000002442800ULL, 0x0000000204085000ULL, 0x0000020408102000ULL, 0x0002040810204000ULL,
+    0x0020100804020000ULL, 0x0040201008040000ULL, 0x00004020100A0000ULL, 0x0000004022140000ULL, 0x0000000244280000ULL, 0x0000020408500000ULL, 0x0002040810200000ULL, 0x0004081020400000ULL,
+    0x0010080402000200ULL, 0x0020100804000400ULL, 0x004020100A000A00ULL, 0x0000402214001400ULL, 0x0000024428002800ULL, 0x0002040850005000ULL, 0x0004081020002000ULL, 0x0008102040004000ULL,
+    0x0008040200020400ULL, 0x0010080400040800ULL, 0x0020100A000A1000ULL, 0x0040221400142200ULL, 0x0002442800284400ULL, 0x0004085000500800ULL, 0x0008102000201000ULL, 0x0010204000402000ULL,
+    0x0004020002040800ULL, 0x0008040004081000ULL, 0x00100A000A102000ULL, 0x0022140014224000ULL, 0x0044280028440200ULL, 0x0008500050080400ULL, 0x0010200020100800ULL, 0x0020400040201000ULL,
+    0x0002000204081000ULL, 0x0004000408102000ULL, 0x000A000A10204000ULL, 0x0014001422400000ULL, 0x0028002844020000ULL, 0x0050005008040200ULL, 0x0020002010080400ULL, 0x0040004020100800ULL,
+    0x0000020408102000ULL, 0x0000040810204000ULL, 0x00000A1020400000ULL, 0x0000142240000000ULL, 0x0000284402000000ULL, 0x0000500804020000ULL, 0x0000201008040200ULL, 0x0000402010080400ULL,
+    0x0002040810204000ULL, 0x0004081020400000ULL, 0x000A102040000000ULL, 0x0014224000000000ULL, 0x0028440200000000ULL, 0x0050080402000000ULL, 0x0020100804020000ULL, 0x0040201008040200ULL,
+};
+const int bishop_shifts[64] = {
+    58, 59, 59, 59, 59, 59, 59, 58,
+    59, 59, 59, 59, 59, 59, 59, 59,
+    59, 59, 57, 57, 57, 57, 59, 59,
+    59, 59, 57, 55, 55, 57, 59, 59,
+    59, 59, 57, 55, 55, 57, 59, 59,
+    59, 59, 57, 57, 57, 57, 59, 59,
+    59, 59, 59, 59, 59, 59, 59, 59,
+    58, 59, 59, 59, 59, 59, 59, 58,
+};
+
+// A struct to hold all the magic bitboard data for a single square.
+struct Magic {
+    uint64_t mask;
+    uint64_t magic;
+    uint64_t* attacks; // Pointer to the attack table for this square
+    int shift;
+};
+
+// We need two large arrays to store all possible attack patterns.
+// The total size is taken from the inspirational engine (Stockfish).
+// Rook attacks require ~100KB, Bishop attacks require ~5KB.
+std::array<uint64_t, 0x19000> RookAttacks;
+std::array<uint64_t, 0x1480> BishopAttacks;
+
+// And the arrays of Magic entries for each square.
+Magic RookMagics[64];
+Magic BishopMagics[64];
+
+// This helper function populates the attack table for a given piece type.
+void init_magics(Piece piece_type, Magic magics[64], std::array<uint64_t, 0x19000>& attacks_table_storage) {
+
+    uint64_t* current_attacks_ptr = attacks_table_storage.data();
+
+    for (int sq = 0; sq < 64; ++sq) {
+        
+        magics[sq].mask = (piece_type == ROOK) ? rook_masks[sq] : bishop_masks[sq];
+        magics[sq].magic = (piece_type == ROOK) ? rook_magics[sq] : bishop_magics[sq];
+        magics[sq].shift = (piece_type == ROOK) ? rook_shifts[sq] : bishop_shifts[sq];
+        magics[sq].attacks = current_attacks_ptr;
+
+        uint64_t mask = magics[sq].mask;
+        int num_mask_bits = pop_count(mask);
+        int num_occupancies = 1 << num_mask_bits;
+        
+        for (int i = 0; i < num_occupancies; ++i) {
+            uint64_t occupancy = 0;
+            uint64_t temp_mask = mask;
+            
+            // This loop maps the bits from `i` to the set bits in `mask`
+            // to generate every possible blocker combination.
+            for (int j = 0; j < num_mask_bits; ++j) {
+                int lsb_idx = lsb_index(temp_mask);
+                temp_mask &= temp_mask - 1;
+                if ((i >> j) & 1) {
+                    occupancy |= (1ULL << lsb_idx);
+                }
+            }
+
+            int magic_index = (occupancy * magics[sq].magic) >> magics[sq].shift;
+
+            if (piece_type == ROOK) {
+                magics[sq].attacks[magic_index] = generate_rook_attacks_slowly(sq, occupancy);
+            } else { // BISHOP
+                magics[sq].attacks[magic_index] = generate_bishop_attacks_slowly(sq, occupancy);
+            }
+        }
+
+        // Advance the pointer for the next square's attack table.
+        current_attacks_ptr += num_occupancies;
+    }
+}
+
+// Main initialization function for all magic bitboards.
+void init_magic_bitboards() {
+    // The second template argument for bishop is a dummy size, as it's smaller than rook.
+    // The actual array is passed as the third argument.
+    init_magics(ROOK, RookMagics, RookAttacks);
+    init_magics(BISHOP, BishopMagics, reinterpret_cast<std::array<uint64_t, 0x19000>&>(BishopAttacks));
+}
+
+// ============================================================================
+// -- END OF MAGIC BITBOARD DATA AND INITIALIZATION --
+// ============================================================================
+
 // --- Attack Tables Init ---
 uint64_t pawn_attacks_bb[2][64];
 uint64_t knight_attacks_bb[64];
@@ -224,67 +447,64 @@ void init_attack_tables() {
     }
 }
 
-// --- Slider Attack Generation ---
-uint64_t get_rook_attacks_from_sq(int sq, uint64_t occupied) {
-    uint64_t attacks = 0;
-    const int deltas[] = {1, -1, 8, -8}; // E, W, N, S
-    for (int d : deltas) {
-        for (int s = sq + d; ; s += d) {
-            if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8; // (s-d) is original square
-            if (std::abs(d) == 1 && r_curr != r_prev) break; // Horizontal wrap-around
-            if (std::abs(d) == 8 && c_curr != c_prev) break; // Vertical wrap-around
+// --- Slider Attack Generation (with Magic Bitboards) ---
 
-            attacks |= set_bit(s);
-            if (get_bit(occupied, s)) break;
-        }
-    }
-    return attacks;
+// This is the new core function for getting bishop attacks.
+inline uint64_t get_bishop_attacks(int sq, uint64_t occupied) {
+    // 1. Mask the occupied bitboard to only include relevant blockers.
+    occupied &= bishop_masks[sq];
+    // 2. Multiply by the magic number.
+    occupied *= bishop_magics[sq];
+    // 3. Shift to get the index into the attack table.
+    int index = occupied >> bishop_shifts[sq];
+    // 4. Return the pre-calculated attack set.
+    return BishopMagics[sq].attacks[index];
 }
 
-uint64_t get_bishop_attacks_from_sq(int sq, uint64_t occupied) {
-    uint64_t attacks = 0;
-    const int deltas[] = {9, -9, 7, -7}; // NE, SW, NW, SE
-    for (int d : deltas) {
-        for (int s = sq + d; ; s += d) {
-            if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
-            if (std::abs(r_curr - r_prev) != 1 || std::abs(c_curr - c_prev) != 1) break; // Diagonal wrap-around
-
-            attacks |= set_bit(s);
-            if (get_bit(occupied, s)) break;
-        }
-    }
-    return attacks;
+// This is the new core function for getting rook attacks.
+inline uint64_t get_rook_attacks(int sq, uint64_t occupied) {
+    // 1. Mask the occupied bitboard to only include relevant blockers.
+    occupied &= rook_masks[sq];
+    // 2. Multiply by the magic number.
+    occupied *= rook_magics[sq];
+    // 3. Shift to get the index into the attack table.
+    int index = occupied >> rook_shifts[sq];
+    // 4. Return the pre-calculated attack set.
+    return RookMagics[sq].attacks[index];
 }
 
+// This function now also uses the new magic bitboard functions.
 uint64_t get_slider_attacks_for_movegen(int sq, Piece piece_type, uint64_t occupied) {
-    if (piece_type == ROOK) return get_rook_attacks_from_sq(sq, occupied);
-    if (piece_type == BISHOP) return get_bishop_attacks_from_sq(sq, occupied);
-    if (piece_type == QUEEN) return get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
+    if (piece_type == ROOK)   return get_rook_attacks(sq, occupied);
+    if (piece_type == BISHOP) return get_bishop_attacks(sq, occupied);
+    if (piece_type == QUEEN)  return get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
     return 0; // Should not happen
 }
 
 // --- is_square_attacked ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
+    // Pawn attacks
     uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
     if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
 
+    // Knight attacks
     uint64_t attacker_knights = pos.piece_bb[KNIGHT] & pos.color_bb[attacker_c];
     if (knight_attacks_bb[sq_to_check] & attacker_knights) return true;
 
+    // King attacks
     uint64_t attacker_king = pos.piece_bb[KING] & pos.color_bb[attacker_c];
     if (king_attacks_bb[sq_to_check] & attacker_king) return true;
 
+    // --- SLIDER ATTACKS USING MAGIC BITBOARDS ---
     uint64_t occupied = pos.get_occupied_bb();
 
-    uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_rook_attacks_from_sq(sq_to_check, occupied) & rook_queen_attackers) return true;
-
+    // Bishop and Queen attacks (diagonal)
     uint64_t bishop_queen_attackers = (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_bishop_attacks_from_sq(sq_to_check, occupied) & bishop_queen_attackers) return true;
+    if (get_bishop_attacks(sq_to_check, occupied) & bishop_queen_attackers) return true;
+    
+    // Rook and Queen attacks (horizontal/vertical)
+    uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
+    if (get_rook_attacks(sq_to_check, occupied) & rook_queen_attackers) return true;
 
     return false;
 }
@@ -867,7 +1087,7 @@ int evaluate(Position& pos) {
                         } 
                     }
                     // Rook Mobility
-                    uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
@@ -915,7 +1135,7 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == BISHOP) {
-                    uint64_t mobility_attacks = get_bishop_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
@@ -941,7 +1161,7 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == QUEEN) {
-                    uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied) | get_bishop_attacks_from_sq(sq, occupied);
+                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_mg;
@@ -1061,18 +1281,18 @@ int evaluate(Position& pos) {
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_player_pieces;
             while(enemy_bishops) {
                 int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
+                if (get_bishop_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
             }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_player_pieces;
             while(enemy_rooks) {
                 int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
+                if (get_rook_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
             }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_player_pieces;
             while(enemy_queens) {
                 int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
+                if (get_bishop_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
+                if (get_rook_attacks(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
             }
             uint64_t temp_king_zone_for_pawns = king_1_ring_zone;
             while(temp_king_zone_for_pawns) {
@@ -1619,6 +1839,28 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
     return h;
 }
 
+// ============================================================================
+// ++ PERFT DEBUGGING FUNCTION ++
+// ============================================================================
+uint64_t perft_driver(Position& pos, int depth) {
+    if (depth == 0) {
+        return 1ULL; // A leaf node
+    }
+
+    Move moves[256];
+    uint64_t node_count = 0;
+    int num_moves = generate_moves(pos, moves, false);
+
+    for (int i = 0; i < num_moves; i++) {
+        bool is_legal;
+        Position next_pos = make_move(pos, moves[i], is_legal);
+        if (is_legal) {
+            node_count += perft_driver(next_pos, depth - 1);
+        }
+    }
+    return node_count;
+}
+
 void uci_loop() {
     std::string line, token;
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -1716,6 +1958,50 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
+            std::string go_param;
+    ss >> go_param; // Read the next word after "go"
+
+    if (go_param == "perft") {
+        int depth = 0;
+        ss >> depth;
+        if (depth > 0) {
+            std::cout << "Starting perft to depth " << depth << "..." << std::endl;
+            auto perft_start_time = std::chrono::steady_clock::now();
+            
+            Move moves[256];
+            int num_moves = generate_moves(uci_root_pos, moves, false);
+            uint64_t total_nodes = 0;
+
+            // Sort moves for consistent output
+            std::sort(moves, moves + num_moves, [](const Move& a, const Move& b) {
+                return move_to_uci(a) < move_to_uci(b);
+            });
+
+            for (int i = 0; i < num_moves; i++) {
+                bool is_legal;
+                // Use a fresh copy of the root position for each move
+                Position next_pos = make_move(uci_root_pos, moves[i], is_legal); 
+                if (is_legal) {
+                    uint64_t nodes_for_move = perft_driver(next_pos, depth - 1);
+                    total_nodes += nodes_for_move;
+                    std::cout << move_to_uci(moves[i]) << ": " << nodes_for_move << std::endl;
+                }
+            }
+
+            auto perft_end_time = std::chrono::steady_clock::now();
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(perft_end_time - perft_start_time).count();
+            if (elapsed_ms < 1) elapsed_ms = 1;
+            uint64_t nps = (total_nodes * 1000) / elapsed_ms;
+
+            std::cout << "\nNodes searched: " << total_nodes << std::endl;
+            std::cout << "Time: " << elapsed_ms << " ms, NPS: " << nps << std::endl;
+        }
+        continue; // Skip the rest of the 'go' command logic
+    }
+    
+    // We need to put the parameter back if it wasn't "perft"
+    ss.seekg(-(std::streamoff)go_param.length(), std::ios_base::cur);
+
             if (!g_tt_is_initialized) {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
@@ -1745,7 +2031,6 @@ void uci_loop() {
             long long wtime = -1, btime = -1;
             int max_depth_to_search = MAX_PLY;
 
-            std::string go_param;
             while(ss >> go_param) {
                 if (go_param == "wtime") ss >> wtime;
                 else if (go_param == "btime") ss >> btime;
@@ -1887,6 +2172,7 @@ int main(int argc, char* argv[]) {
 
     init_zobrist();
     init_attack_tables();
+    init_magic_bitboards();
     init_eval_masks();
     init_pawn_cache();
     reset_killers_and_history();
