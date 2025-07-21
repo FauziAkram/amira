@@ -828,6 +828,15 @@ int evaluate(Position& pos) {
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
         
+        // Pre-calculate enemy pawn attacks once per color evaluation.
+        uint64_t enemy_pawn_attacks = 0;
+        uint64_t temp_enemy_pawns_for_attack_map = all_enemy_pawns;
+        while(temp_enemy_pawns_for_attack_map) {
+            int pawn_sq = lsb_index(temp_enemy_pawns_for_attack_map);
+            enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
+            temp_enemy_pawns_for_attack_map &= temp_enemy_pawns_for_attack_map - 1;
+        }
+        
         // Material, PST, and Feature Evaluation
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
@@ -880,15 +889,7 @@ int evaluate(Position& pos) {
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
-                    
-                    uint64_t enemy_pawn_attacks = 0;
-                    uint64_t temp_enemy_pawns = all_enemy_pawns;
-                    while(temp_enemy_pawns) {
-                        int pawn_sq = lsb_index(temp_enemy_pawns);
-                        enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
-                        temp_enemy_pawns &= temp_enemy_pawns - 1;
-                    }
-                    
+
                     // Knight Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
@@ -920,15 +921,7 @@ int evaluate(Position& pos) {
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
-                    
-                    uint64_t enemy_pawn_attacks = 0;
-                    uint64_t temp_enemy_pawns = all_enemy_pawns;
-                    while(temp_enemy_pawns) {
-                        int pawn_sq = lsb_index(temp_enemy_pawns);
-                        enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
-                        temp_enemy_pawns &= temp_enemy_pawns - 1;
-                    }
-                    
+
                     // Bishop Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
@@ -1628,7 +1621,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.3\n";
+            std::cout << "id name Amira 1.31\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
