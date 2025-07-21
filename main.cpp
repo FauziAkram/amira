@@ -1628,7 +1628,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.22\n";
+            std::cout << "id name Amira 1.3\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1742,29 +1742,66 @@ void uci_loop() {
                 continue;
             }
 
-            long long wtime = -1, btime = -1;
+            // --- Time Control Parsing ---
+            long long wtime = -1, btime = -1, winc = 0, binc = 0;
+            int movestogo = 0;
             int max_depth_to_search = MAX_PLY;
 
             std::string go_param;
             while(ss >> go_param) {
                 if (go_param == "wtime") ss >> wtime;
                 else if (go_param == "btime") ss >> btime;
+                else if (go_param == "winc") ss >> winc;
+                else if (go_param == "binc") ss >> binc;
+                else if (go_param == "movestogo") ss >> movestogo;
                 else if (go_param == "depth") ss >> max_depth_to_search;
             }
 
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
 
-            long long time_alotment_ms = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
+            long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
+            long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
 
-            if (time_alotment_ms != -1) {
+            if (my_time != -1) {
                 use_time_limits = true;
-                double soft_limit_s = time_alotment_ms * 0.000052;
-                double hard_limit_s = time_alotment_ms * 0.00041;
-                soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
-                hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
-            } else
+
+                if (my_inc > 0) {
+                    // --- INCREMENT TIME CONTROL ---
+                    // Per user request, this original logic is preserved for increment controls.
+                    double soft_limit_s = my_time * 0.000052;
+                    double hard_limit_s = my_time * 0.00041;
+                    soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
+                    hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
+                } else {
+                    // --- SUDDEN DEATH TIME CONTROL ---
+                    // This logic aims to use a fraction of the remaining time.
+
+                    // If 'movestogo' is given, we use that to divide our time.
+                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
+                    int divisor = (movestogo > 0) ? movestogo : 25;
+
+                    // Calculate the allocated time for this move.
+                    long long allocated_time_ms = my_time / divisor;
+                    
+                    // Safety net: never use more than ~80% of the remaining time on a single move,
+                    // especially if movestogo is very low (e.g., 1).
+                    allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
+                    
+                    // Final safety buffer: always leave a small amount of time on the clock.
+                    if (allocated_time_ms >= my_time) {
+                        allocated_time_ms = my_time - 100; // Leave 100ms
+                    }
+                    if (allocated_time_ms < 0) allocated_time_ms = 0;
+                    
+                    // For simplicity, we use the same time for both soft and hard limits.
+                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
+                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
+                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
+                }
+            } else {
                 use_time_limits = false;
+            }
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
