@@ -752,7 +752,7 @@ const int ROOK_ON_OPEN_FILE_EG = 15;
 const int ROOK_ON_SEMI_OPEN_FILE_MG = 10;
 const int ROOK_ON_SEMI_OPEN_FILE_EG = 5;
 
-// --- New Evaluation Constants for King Safety and Rook on 7th ---
+// --- Evaluation Constants for King Safety and Rook on 7th ---
 // Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
 const int knight_tropism_bonus[8] = { 20, 15, 10, 5, 2, 1, 0, 0 };
 const int bishop_tropism_bonus[8] = { 15, 12, 9,  4, 2, 1, 0, 0 };
@@ -1645,7 +1645,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 Position uci_root_pos;
 Move uci_best_move_overall;
 Move uci_last_root_move = NULL_MOVE;
-
 
 uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
     uint64_t h = 0;
