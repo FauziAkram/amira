@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
-#include <cmath>    // For std::abs
+#include <cmath>    // For std::log
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -635,6 +635,7 @@ const int ROOK_ON_OPEN_FILE_EG = 15;
 const int ROOK_ON_SEMI_OPEN_FILE_MG = 10;
 const int ROOK_ON_SEMI_OPEN_FILE_EG = 5;
 
+// --- Evaluation Constants for King Safety and Rook on 7th ---
 // Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
 const int knight_tropism_bonus[8] = { 20, 15, 10, 5, 2, 1, 0, 0 };
 const int bishop_tropism_bonus[8] = { 15, 12, 9,  4, 2, 1, 0, 0 };
@@ -1215,6 +1216,8 @@ bool use_time_limits = false;
 // Search Heuristics
 Move killer_moves[MAX_PLY][2];
 int move_history_score[2][64][64];
+Move refutation_moves[64][64];       // For Counter-Move Heuristic
+int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
 constexpr int MAX_HISTORY_SCORE = 24000;
 
 // Repetition Detection Data Structures
@@ -1228,12 +1231,29 @@ void reset_search_state() {
     use_time_limits = false;
 }
 
-void reset_killers_and_history() {
-    for(int i=0; i<MAX_PLY; ++i) {
-        killer_moves[i][0] = NULL_MOVE;
-        killer_moves[i][1] = NULL_MOVE;
-    }
+void reset_search_heuristics() {
+    std::memset(killer_moves, 0, sizeof(killer_moves));
     std::memset(move_history_score, 0, sizeof(move_history_score));
+    std::memset(refutation_moves, 0, sizeof(refutation_moves));
+
+    // Initialize LMR table
+    for (int d = 1; d < MAX_PLY; ++d) {
+        for (int m = 1; m < 256; ++m) {
+            // Formula: log(depth) * log(moves_searched) / C
+            double reduction = (log(d) * log(m)) / 2.3;
+            
+            int r = static_cast<int>(reduction);
+
+            // Basic caps and conditions
+            if (d < 3 || m < 2) r = 0;
+            if (d > 8 && m > 4) r++;
+            
+            r = std::max(0, r);
+            r = std::min(r, d - 2); // Ensure at least 1 ply of search remains after reduction
+            
+            search_reductions[d][m] = r;
+        }
+    }
 }
 
 bool check_time() {
@@ -1251,7 +1271,9 @@ bool check_time() {
 
 const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
 
-void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply) {
+void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply, const Move& prev_move) {
+    Move refutation = (ply > 0 && !prev_move.is_null()) ? refutation_moves[prev_move.from][prev_move.to] : NULL_MOVE;
+
     for (int i = 0; i < num_moves; ++i) {
         Move& m = moves[i];
         if (!tt_move.is_null() && m == tt_move) {
@@ -1265,6 +1287,8 @@ void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt
                 m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
             } else if (m.promotion != NO_PIECE) {
                  m.score = 900000 + mvv_lva_piece_values[m.promotion];
+            } else if (!refutation.is_null() && m == refutation) {
+                m.score = 850000; // Refutation move
             } else if (ply < MAX_PLY && !killer_moves[ply][0].is_null() && m == killer_moves[ply][0]) {
                 m.score = 800000; // First killer move
             } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
@@ -1297,8 +1321,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     Move q_moves[256];
     int num_q_moves = generate_moves(pos, q_moves, !in_check);
 
-    Move dummy_tt_move = NULL_MOVE;
-    score_moves(pos, q_moves, num_q_moves, dummy_tt_move, ply);
+    score_moves(pos, q_moves, num_q_moves, NULL_MOVE, ply, NULL_MOVE);
 
     int legal_moves_in_qsearch = 0;
     for (int i = 0; i < num_q_moves; ++i) {
@@ -1323,7 +1346,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 }
 
 // Search function signature and repetition logic
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move) {
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move) {
     search_path_hashes[ply] = pos.zobrist_hash;
 
     nodes_searched++;
@@ -1350,22 +1373,20 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         int static_eval = evaluate(pos);
 
         // Reverse Futility Pruning (RFP)
-        // If our static eval is much better than beta, we can often prune this node.
         if (depth < 8) {
             int futility_margin = 90 + 60 * depth;
             if (static_eval - futility_margin >= beta) {
-                return beta; // Prune, assumes we have a winning position
+                return beta; 
             }
         }
 
         // Razoring
-        // If our static eval is very low, do a quick qsearch. If it's still bad, prune.
         if (depth < 4) {
             int razoring_margin = 250 + 80 * (depth-1);
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha) {
-                    return alpha; // Prune, this branch seems hopeless
+                    return alpha;
                 }
             }
         }
@@ -1385,7 +1406,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1;
 
             int R_nmp = (depth > 6) ? 3 : 2;
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false);
+            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -1397,7 +1418,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     Move moves[256];
     int num_moves = generate_moves(pos, moves, false);
-    score_moves(pos, moves, num_moves, tt_move, ply);
+    score_moves(pos, moves, num_moves, tt_move, ply, prev_move);
 
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
@@ -1432,25 +1453,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             score = 0;
         } else {
             if (legal_moves_played == 1) { // PVS: First move gets full window search
-                score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true);
+                score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
             } else {
                 int R_lmr = 0;
-                // Late Move Reductions (LMR)
-                if (depth >= 3 && i >= 2 && !in_check && current_move.promotion == NO_PIECE &&
+                // Late Move Reductions (LMR) with table
+                if (depth >= 3 && i >= 1 && !in_check && current_move.promotion == NO_PIECE &&
                     pos.piece_on_sq(current_move.to) == NO_PIECE) {
-                    R_lmr = 1;
-                    if (depth >= 5) R_lmr++;
-                    if (i >= 6) R_lmr++;
-                    R_lmr = std::min(R_lmr, depth - 2);
-                    R_lmr = std::max(R_lmr, 0);
+                    R_lmr = search_reductions[depth][i];
                 }
 
-                score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true);
+                score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
                 if (score > alpha && R_lmr > 0) { // Re-search if reduction was too aggressive
-                     score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true);
+                     score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_move);
                 }
                 if (score > alpha && score < beta) {
-                     score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true);
+                     score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_move);
                 }
             }
         }
@@ -1463,15 +1480,22 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (score > alpha) {
                 alpha = score;
                 if (score >= beta) {
-                    if (ply < MAX_PLY && pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
-                        if (!(current_move == killer_moves[ply][0])) {
-                            killer_moves[ply][1] = killer_moves[ply][0];
-                            killer_moves[ply][0] = current_move;
+                    if (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
+                        // Killer move update
+                        if (ply < MAX_PLY) {
+                            if (!(current_move == killer_moves[ply][0])) {
+                                killer_moves[ply][1] = killer_moves[ply][0];
+                                killer_moves[ply][0] = current_move;
+                            }
+                        }
+
+                        // Refutation move update
+                        if (ply > 0 && !prev_move.is_null()) {
+                            refutation_moves[prev_move.from][prev_move.to] = current_move;
                         }
 
                         // History Heuristic Update
                         int bonus = depth * depth;
-                        // Reward the move that caused the cutoff
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
@@ -1632,7 +1656,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.31\n";
+            std::cout << "id name Amira 1.36\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1668,7 +1692,7 @@ void uci_loop() {
                  clear_tt();
             }
             clear_pawn_cache();
-            reset_killers_and_history();
+            reset_search_heuristics();
             game_history_length = 0;
         } else if (token == "position") {
             std::string fen_str_collector;
@@ -1817,13 +1841,13 @@ void uci_loop() {
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
                 if (depth <= 1)
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true);
+                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, NULL_MOVE);
                 else {
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
+                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, NULL_MOVE);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                         aspiration_alpha = -INF_SCORE;
                         aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true);
+                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, NULL_MOVE);
                     }
                 }
 
@@ -1930,7 +1954,7 @@ int main(int argc, char* argv[]) {
     init_attack_tables();
     init_eval_masks();
     init_pawn_cache();
-    reset_killers_and_history();
+    reset_search_heuristics();
 
     uci_loop();
     return 0;
