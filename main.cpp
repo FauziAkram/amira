@@ -38,10 +38,6 @@ constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
 constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
 constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
 
-// King safety penalty tables (index is king_attack_score, capped)
-const int king_danger_penalty_mg[15] = {0, 0, 5, 15, 30, 50, 75, 100, 130, 160, 200, 240, 280, 320, 350};
-const int king_danger_penalty_eg[15] = {0, 0, 0,  5, 10, 15,  20,  30,  40,  50,  60,  70,  80,  90, 100};
-
 // Forward Declarations
 struct Move;
 struct Position;
@@ -634,10 +630,41 @@ const int minor_on_heavy_pressure_eg = 15;
 const int rook_on_minor_pressure_mg = 15;
 const int rook_on_minor_pressure_eg = 10;
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
-const int ROOK_OPEN_FILE_MG = 20;
-const int ROOK_OPEN_FILE_EG = 15;
-const int ROOK_SEMI_OPEN_FILE_MG = 10;
-const int ROOK_SEMI_OPEN_FILE_EG = 5;
+const int ROOK_ON_OPEN_FILE_MG = 20;
+const int ROOK_ON_OPEN_FILE_EG = 15;
+const int ROOK_ON_SEMI_OPEN_FILE_MG = 10;
+const int ROOK_ON_SEMI_OPEN_FILE_EG = 5;
+
+// Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
+const int knight_tropism_bonus[8] = { 20, 15, 10, 5, 2, 1, 0, 0 };
+const int bishop_tropism_bonus[8] = { 15, 12, 9,  4, 2, 1, 0, 0 };
+const int rook_tropism_bonus[8]   = { 25, 20, 15, 10, 5, 2, 1, 0 };
+const int queen_tropism_bonus[8]  = { 40, 30, 20, 10, 5, 2, 1, 0 };
+
+// King Threat Penalty Table (indexed by combined tropism score)
+const int king_threat_penalty_mg[31] = {
+    0,  0,  4,  8, 16, 25, 35, 46, 58, 70, 85, 100, 115, 130, 150,
+  170,190,210,230,250,270,290,310,330,350,370, 390, 410, 430, 450, 470
+};
+const int king_threat_penalty_eg[31] = {
+    0,  0,  2,  4,  8, 12, 16, 20, 25, 30, 35,  40,  45,  50,  55,
+   60, 65, 70, 75, 80, 85, 90, 95,100,105,110, 115, 120, 125, 130, 135
+};
+
+// King Shelter Penalties (Middlegame only)
+const int SHIELD_PAWN_PRESENT_BONUS = 10;
+const int SHIELD_PAWN_MISSING_PENALTY = -20;
+const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
+const int SHIELD_OPEN_FILE_PENALTY = -15;
+
+// Rook on 7th Rank Bonuses
+const int ROOK_ATTACK_RANK_MG = 25;
+const int ROOK_ATTACK_RANK_EG = 35;
+const int ATTACK_RANK_KING_TRAP_MG = 15;
+const int ATTACK_RANK_KING_TRAP_EG = 20;
+const int ATTACK_RANK_CONNECTIVITY_MG = 12;
+const int ATTACK_RANK_CONNECTIVITY_EG = 18;
+
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -868,13 +895,36 @@ int evaluate(Position& pos) {
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
                         if (!enemy_pawn_on_file) { // Open file
-                            mg_score += side_multiplier * ROOK_OPEN_FILE_MG; 
-                            eg_score += side_multiplier * ROOK_OPEN_FILE_EG; 
+                            mg_score += side_multiplier * ROOK_ON_OPEN_FILE_MG; 
+                            eg_score += side_multiplier * ROOK_ON_OPEN_FILE_EG; 
                         } else { // Semi-open file
-                            mg_score += side_multiplier * ROOK_SEMI_OPEN_FILE_MG; 
-                            eg_score += side_multiplier * ROOK_SEMI_OPEN_FILE_EG;
+                            mg_score += side_multiplier * ROOK_ON_SEMI_OPEN_FILE_MG; 
+                            eg_score += side_multiplier * ROOK_ON_SEMI_OPEN_FILE_EG;
                         } 
                     }
+                    
+                    // --- Rook on Attack Rank Bonus ---
+                    int attack_rank = (current_eval_color == WHITE) ? 6 : 1;
+                    if (sq / 8 == attack_rank) {
+                        mg_score += side_multiplier * ROOK_ATTACK_RANK_MG;
+                        eg_score += side_multiplier * ROOK_ATTACK_RANK_EG;
+
+                        int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
+                        if (enemy_king_sq != -1) {
+                            int enemy_back_rank = (enemy_color == WHITE) ? 0 : 7;
+                            if (enemy_king_sq / 8 == enemy_back_rank) {
+                                mg_score += side_multiplier * ATTACK_RANK_KING_TRAP_MG;
+                                eg_score += side_multiplier * ATTACK_RANK_KING_TRAP_EG;
+                            }
+                        }
+                        
+                        uint64_t friendly_heavies = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & friendly_pieces;
+                        if (get_rook_attacks_from_sq(sq, occupied) & friendly_heavies & ~set_bit(sq)) {
+                            mg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_MG;
+                            eg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_EG;
+                        }
+                    }
+
                     // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks_from_sq(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
@@ -966,117 +1016,78 @@ int evaluate(Position& pos) {
              eg_score += side_multiplier * rook_on_minor_pressure_eg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
         }
 
-        // --- King Safety and Pawn Shield ---
-        int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[current_eval_color]);
+        // --- King Safety and Shelter Evaluation ---
+        int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
         if (king_sq != -1) {
-            int king_rank = king_sq / 8, king_file = king_sq % 8;
+            // PART 1: King Shelter (Pawn Shield)
+            int shelter_score = 0;
+            int king_file = king_sq % 8;
+            int king_rank = king_sq / 8;
+            int shield_f_start = std::max(0, king_file - 1);
+            int shield_f_end = std::min(7, king_file + 1);
+            int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
+            int shield_rank_2 = (current_eval_color == WHITE) ? king_rank + 2 : king_rank - 2;
 
-            // PAWN SHIELD
-            int pawn_shield_score = 0;
-            const int shield_pawn_bonus = 12;
-            const int missing_shield_pawn_penalty = -18;
-            const int open_file_penalty_adj = -10; // Additional for open file on missing shield
-            int shield_candidate_sqs[3] = {-1, -1, -1};
-            bool relevant_castled_pos = false;
+            if (shield_rank_1 >= 0 && shield_rank_1 < 8) {
+                for (int f = shield_f_start; f <= shield_f_end; ++f) {
+                    uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
 
-            if (current_eval_color == WHITE) {
-                if (king_sq == G1_SQ) { // White Kingside Castle
-                    shield_candidate_sqs[0] = G1_SQ + 7; shield_candidate_sqs[1] = G1_SQ + 8; shield_candidate_sqs[2] = G1_SQ + 9; // F2,G2,H2
-                    relevant_castled_pos = true;
-                } else if (king_sq == C1_SQ) { // White Queenside Castle
-                    shield_candidate_sqs[0] = C1_SQ + 7; shield_candidate_sqs[1] = C1_SQ + 8; shield_candidate_sqs[2] = C1_SQ + 9; // B2,C2,D2
-                    relevant_castled_pos = true;
-                }
-            } else { // BLACK
-                if (king_sq == G8_SQ) { // Black Kingside Castle
-                    shield_candidate_sqs[0] = G8_SQ - 9; shield_candidate_sqs[1] = G8_SQ - 8; shield_candidate_sqs[2] = G8_SQ - 7; // F7,G7,H7
-                    relevant_castled_pos = true;
-                } else if (king_sq == C8_SQ) { // Black Queenside Castle
-                    shield_candidate_sqs[0] = C8_SQ - 9; shield_candidate_sqs[1] = C8_SQ - 8; shield_candidate_sqs[2] = C8_SQ - 7; // B7,C7,D7
-                    relevant_castled_pos = true;
-                }
-            }
-
-            if (relevant_castled_pos) {
-                for (int sq_idx = 0; sq_idx < 3; ++sq_idx) {
-                    int shield_sq = shield_candidate_sqs[sq_idx];
-                    // Ensure shield_sq is on board (it should be by construction from G1/C1 etc.)
-                    if (shield_sq >=0 && shield_sq < 64) {
-                        if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color)
-                            pawn_shield_score += shield_pawn_bonus;
-                        else {
-                            pawn_shield_score += missing_shield_pawn_penalty;
-                            int shield_f = shield_sq % 8;
-                            bool friendly_pawn_on_shield_file = (file_bb_mask[shield_f] & all_friendly_pawns) != 0;
-                            bool enemy_pawn_on_shield_file = (file_bb_mask[shield_f] & all_enemy_pawns) != 0;
-                            if (!friendly_pawn_on_shield_file && !enemy_pawn_on_shield_file) {
-                                pawn_shield_score += open_file_penalty_adj;
-                            }
+                    if (!friendly_pawns_on_file) {
+                        shelter_score += SHIELD_PAWN_MISSING_PENALTY;
+                        if (!(file_bb_mask[f] & all_enemy_pawns)) {
+                            shelter_score += SHIELD_OPEN_FILE_PENALTY;
                         }
-                    }
-                }
-            } else { // General pawn shield for non-standard king positions
-                int base_shield_rank = (current_eval_color == WHITE) ? (king_rank + 1) : (king_rank - 1);
-                if (base_shield_rank >= 0 && base_shield_rank < 8) {
-                    for (int df = -1; df <= 1; ++df) {
-                        int current_shield_file = king_file + df;
-                        if (current_shield_file >= 0 && current_shield_file < 8) {
-                            int shield_sq = base_shield_rank * 8 + current_shield_file;
-                            if (pos.piece_on_sq(shield_sq) == PAWN && pos.color_on_sq(shield_sq) == current_eval_color) {
-                                pawn_shield_score += shield_pawn_bonus / 2; // Smaller bonus
-                            } else {
-                                pawn_shield_score += missing_shield_pawn_penalty / 2;
-                                int shield_f = shield_sq % 8;
-                                bool friendly_pawn_on_gen_shield_file = (file_bb_mask[shield_f] & all_friendly_pawns) != 0;
-                                bool enemy_pawn_on_gen_shield_file = (file_bb_mask[shield_f] & all_enemy_pawns) != 0;
-                                if (!friendly_pawn_on_gen_shield_file && !enemy_pawn_on_gen_shield_file) {
-                                    pawn_shield_score += open_file_penalty_adj / 2;
-                                }
-                            }
+                    } else {
+                        bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
+                        bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
+
+                        if (pawn_on_shield_rank_1) {
+                            shelter_score += SHIELD_PAWN_PRESENT_BONUS;
+                        } else if (pawn_on_shield_rank_2) {
+                            shelter_score += SHIELD_PAWN_ADVANCED_PENALTY;
+                        } else {
+                            shelter_score += SHIELD_PAWN_MISSING_PENALTY;
                         }
                     }
                 }
             }
-            mg_score += side_multiplier * pawn_shield_score;
-            // eg_score += side_multiplier * (pawn_shield_score / 3); // Less emphasis in EG for shield
 
-            // KING SAFETY (ATTACKS ON KING'S IMMEDIATE VICINITY)
-            int king_attack_score = 0; // Aggregated score of attacks
-            uint64_t king_1_ring_zone = king_attacks_bb[king_sq]; // Squares king can move to
-            uint64_t enemy_player_pieces = pos.color_bb[1 - current_eval_color];
-            uint64_t occupied_bb = pos.get_occupied_bb();
+            int home_rank = (current_eval_color == WHITE) ? 0 : 7;
+            if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58))) {
+                mg_score += side_multiplier * shelter_score;
+            }
 
-            uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_player_pieces;
-            while(enemy_knights) {
+            // PART 2: King Threat Assessment via Piece Tropism
+            int attack_proximity_score = 0;
+            
+            uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_pieces;
+            while (enemy_knights) {
                 int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
-                if (knight_attacks_bb[attacker_sq] & king_1_ring_zone) king_attack_score += 2;
+                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                attack_proximity_score += knight_tropism_bonus[dist];
             }
-            uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_player_pieces;
-            while(enemy_bishops) {
+            uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_pieces;
+            while (enemy_bishops) {
                 int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 2;
+                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                attack_proximity_score += bishop_tropism_bonus[dist];
             }
-            uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_player_pieces;
-            while(enemy_rooks) {
+            uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_pieces;
+            while (enemy_rooks) {
                 int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 3;
+                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                attack_proximity_score += rook_tropism_bonus[dist];
             }
-            uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_player_pieces;
-            while(enemy_queens) {
+            uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_pieces;
+            while (enemy_queens) {
                 int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                if (get_bishop_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 4; // Queen as bishop
-                if (get_rook_attacks_from_sq(attacker_sq, occupied_bb) & king_1_ring_zone) king_attack_score += 5;   // Queen as rook
+                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                attack_proximity_score += queen_tropism_bonus[dist];
             }
-            uint64_t temp_king_zone_for_pawns = king_1_ring_zone;
-            while(temp_king_zone_for_pawns) {
-                int sq_in_kz = lsb_index(temp_king_zone_for_pawns); temp_king_zone_for_pawns &= temp_king_zone_for_pawns -1;
-                if (pawn_attacks_bb[current_eval_color][sq_in_kz] & all_enemy_pawns) { // Enemy pawns that attack this king zone square
-                    king_attack_score += 1;
-                }
-            }
-            int danger_idx = std::min(king_attack_score, 14); // Cap index for penalty table
-            mg_score -= side_multiplier * king_danger_penalty_mg[danger_idx];
-            eg_score -= side_multiplier * king_danger_penalty_eg[danger_idx];
+
+            int danger_idx = std::min(attack_proximity_score / 10, 30); // Scale and cap index
+            mg_score -= side_multiplier * king_threat_penalty_mg[danger_idx];
+            eg_score -= side_multiplier * king_threat_penalty_eg[danger_idx];
         }
     }
 
