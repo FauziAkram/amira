@@ -161,6 +161,7 @@ uint64_t se(uint64_t b) { return south(east(b)); }
 struct Position {
     uint64_t piece_bb[6];
     uint64_t color_bb[2];
+    Piece board[64];
     int side_to_move;
     int ep_square;
     uint8_t castling_rights;
@@ -171,7 +172,10 @@ struct Position {
     int ply;
 
     Position() {
-        std::memset(this, 0, sizeof(Position)); // Efficiently zero out
+        std::memset(this, 0, sizeof(Position)); // Efficiently zero out bitboards and integers
+        for (int i = 0; i < 64; ++i) {
+            board[i] = NO_PIECE;
+        }
         side_to_move = WHITE;
         ep_square = -1;
         fullmove_number = 1;
@@ -179,15 +183,12 @@ struct Position {
 
     uint64_t get_occupied_bb() const { return color_bb[WHITE] | color_bb[BLACK]; }
 
-    Piece piece_on_sq(int sq) const {
+    // O(1) lookup
+    inline Piece piece_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_PIECE;
-        uint64_t b = set_bit(sq);
-        if (!( (color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
-        for (int p = PAWN; p <= KING; ++p) {
-            if (piece_bb[p] & b) return (Piece)p;
-        }
-        return NO_PIECE; // Should not be reached if occupied bit was set
+        return board[sq];
     }
+    
     Color color_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_COLOR;
         uint64_t b = set_bit(sq);
@@ -532,8 +533,11 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     next_pos.pawn_zobrist_key = pos.pawn_zobrist_key;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
 
+    // Update bitboards
     next_pos.piece_bb[piece_moved] &= ~from_bb;
     next_pos.color_bb[stm] &= ~from_bb;
+    // Update mailbox array
+    next_pos.board[move.from] = NO_PIECE;
 
     next_pos.halfmove_clock++;
 
@@ -555,6 +559,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
         next_pos.piece_bb[PAWN] &= ~set_bit(captured_pawn_sq);
         next_pos.color_bb[opp] &= ~set_bit(captured_pawn_sq);
+        // Update mailbox for EP capture
+        next_pos.board[captured_pawn_sq] = NO_PIECE;
         next_pos.zobrist_hash ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
         next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
     }
@@ -574,6 +580,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         // The moving pawn doesn't get added back to the pawn key.
         next_pos.piece_bb[move.promotion] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
+        // Update mailbox for promotion
+        next_pos.board[move.to] = move.promotion;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
     } else {
         if (piece_moved == PAWN) {
@@ -581,6 +589,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         }
         next_pos.piece_bb[piece_moved] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
+        // Update mailbox for normal move
+        next_pos.board[move.to] = piece_moved;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
     }
 
@@ -603,6 +613,9 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
             next_pos.piece_bb[ROOK] |= set_bit(rook_to_sq);
             next_pos.color_bb[stm] &= ~set_bit(rook_from_sq);
             next_pos.color_bb[stm] |= set_bit(rook_to_sq);
+            // Update mailbox for castling rook
+            next_pos.board[rook_from_sq] = NO_PIECE;
+            next_pos.board[rook_to_sq] = ROOK;
             next_pos.zobrist_hash ^= zobrist_pieces[stm][ROOK][rook_from_sq];
             next_pos.zobrist_hash ^= zobrist_pieces[stm][ROOK][rook_to_sq];
         }
@@ -1660,7 +1673,7 @@ uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
 }
 
 void parse_fen(Position& pos, const std::string& fen_str) {
-    pos = Position(); // Reset position object
+    pos = Position(); // Reset position object (constructor now initializes board array)
     std::stringstream ss(fen_str);
     std::string part;
 
@@ -1684,6 +1697,8 @@ void parse_fen(Position& pos, const std::string& fen_str) {
                 int sq = rank * 8 + file;
                 pos.piece_bb[p_type] |= set_bit(sq);
                 pos.color_bb[p_color] |= set_bit(sq);
+                // Update mailbox array during FEN parsing
+                pos.board[sq] = p_type;
             }
             file++;
         }
@@ -1775,7 +1790,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.4\n";
+            std::cout << "id name Amira 1.41\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
