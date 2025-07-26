@@ -2038,25 +2038,33 @@ void uci_loop() {
                 if (depth >= max_depth_to_search) break;
             }
 
-            if (!uci_best_move_overall.is_null()) {
-                 std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
-            } else {
-                Move legal_moves_fallback[256];
-                int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
-                bool found_one_legal_fallback = false;
-                for(int i = 0; i < num_fallback_moves; ++i) {
-                    const auto& m_fall = legal_moves_fallback[i];
-                    bool is_leg_fall;
-                    make_move(uci_root_pos, m_fall, is_leg_fall);
-                    if(is_leg_fall) {
-                        std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
-                        found_one_legal_fallback = true;
+            // --- Post-search: Final Best Move Selection & Validation ---
+            
+            // 1. Get the candidate best move from the Transposition Table.
+            Move candidate_move = uci_best_move_overall;
+
+            // 2. Validate the candidate move. Check if it is in our list of legal moves.
+            bool is_candidate_legal = false;
+            if (!candidate_move.is_null()) {
+                for (const Move& legal_move : root_legal_moves) {
+                    if (candidate_move == legal_move) {
+                        is_candidate_legal = true;
                         break;
                     }
                 }
-                if (!found_one_legal_fallback) {
-                     std::cout << "bestmove 0000\n" << std::flush;
-                }
+            }
+
+            // 3. Decide on the final move to play.
+            if (is_candidate_legal) {
+                // The move from the TT is legal and is our choice.
+                std::cout << "bestmove " << move_to_uci(candidate_move) << std::endl;
+            } else if (!root_legal_moves.empty()) {
+                // The TT move was invalid or null. Fall back to the first available legal move.
+                // This is a safe fallback that guarantees we send a legal move if one exists.
+                std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
+            } else {
+                // There are no legal moves (checkmate or stalemate).
+                std::cout << "bestmove 0000" << std::endl;
             }
 
         } else if (token == "quit" || token == "stop") {
