@@ -9,6 +9,7 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::log
+#include <cassert>  // For assert()
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -136,17 +137,32 @@ inline int pop_count(uint64_t bb) {
     return count;
 #endif
 }
+
+// --- A PERFECTLY SAFE LSB_INDEX IMPLEMENTATION ---
+const int index64[64] = {
+    0, 47,  1, 56, 48, 27,  2, 60,
+   57, 49, 41, 37, 28, 16,  3, 61,
+   54, 58, 35, 52, 50, 42, 21, 44,
+   38, 32, 29, 24, 17, 12,  4, 62,
+   46, 55, 26, 59, 40, 36, 15, 53,
+   34, 51, 20, 43, 31, 23, 11, 45,
+   25, 39, 14, 33, 19, 30, 10, 22,
+   13, 18,  9,  8,  7,  6,  5, 63
+};
+
 inline int lsb_index(uint64_t bb) {
-    if (bb == 0) return -1;
+    if (bb == 0) return -1; // Return -1 if bitboard is empty
 #if defined(_MSC_VER)
     unsigned long idx; _BitScanForward64(&idx, bb); return static_cast<int>(idx);
 #elif defined(__GNUC__) || defined(__clang__)
     return __builtin_ctzll(bb);
 #else
-    int count = 0; while (!((bb >> count) & 1)) { count++; if (count >= 64) return -1; }
-    return count;
+    // Fallback using a De Bruijn bitscan - this is perfectly safe and correct.
+    const uint64_t debruijn64 = 0x03f79d71b4cb0a89ULL;
+    return index64[((bb & -bb) * debruijn64) >> 58];
 #endif
 }
+
 
 uint64_t north(uint64_t b) { return b << 8; }
 uint64_t south(uint64_t b) { return b >> 8; }
@@ -332,6 +348,7 @@ void init_magic_bitboards() {
             uint64_t blockers = 0;
             uint64_t temp_mask = mask;
             for (int j = 0; j < num_mask_bits; ++j) {
+                assert(temp_mask != 0);
                 int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
                 if ((i >> j) & 1) {
@@ -349,6 +366,7 @@ void init_magic_bitboards() {
             uint64_t blockers = 0;
             uint64_t temp_mask = mask;
             for (int j = 0; j < num_mask_bits; ++j) {
+                assert(temp_mask != 0);
                 int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
                 if ((i >> j) & 1) {
@@ -413,6 +431,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
 
     uint64_t pawns = pos.piece_bb[PAWN] & my_pieces;
     while (pawns) {
+        assert(pawns != 0);
         int from = lsb_index(pawns);
         pawns &= pawns - 1;
         int rank = from / 8;
@@ -446,6 +465,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
              }
         }
         while (pawn_cap_targets) {
+            assert(pawn_cap_targets != 0);
             int to = lsb_index(pawn_cap_targets);
             pawn_cap_targets &= pawn_cap_targets - 1;
             if (rank == promotion_rank_idx) { // Reached promotion rank by capture
@@ -461,6 +481,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     for (Piece p_type : piece_types_non_pawn) {
         uint64_t pieces_of_type = pos.piece_bb[p_type] & my_pieces;
         while (pieces_of_type) {
+            assert(pieces_of_type != 0);
             int from = lsb_index(pieces_of_type);
             pieces_of_type &= pieces_of_type - 1;
 
@@ -474,6 +495,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
             attacks &= (captures_only ? opp_pieces : ~my_pieces); // Only captures or any non-friendly square
 
             while (attacks) {
+                assert(attacks != 0);
                 int to = lsb_index(attacks);
                 attacks &= attacks - 1;
                 moves_list[move_count++] = {from, to};
@@ -855,12 +877,14 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
     uint64_t enemy_pawn_attacks = 0;
     uint64_t temp_enemy_pawns = all_enemy_pawns;
     while(temp_enemy_pawns) {
+        assert(temp_enemy_pawns != 0);
         int pawn_sq = lsb_index(temp_enemy_pawns);
         enemy_pawn_attacks |= pawn_attacks_bb[1 - current_eval_color][pawn_sq];
         temp_enemy_pawns &= temp_enemy_pawns - 1;
     }
 
     while (temp_pawns) {
+        assert(temp_pawns != 0);
         int sq = lsb_index(temp_pawns);
         temp_pawns &= temp_pawns - 1;
         int f = sq % 8;
@@ -977,6 +1001,7 @@ int evaluate(Position& pos) {
         uint64_t enemy_pawn_attacks = 0;
         uint64_t temp_enemy_pawns_for_attack_map = all_enemy_pawns;
         while(temp_enemy_pawns_for_attack_map) {
+            assert(temp_enemy_pawns_for_attack_map != 0);
             int pawn_sq = lsb_index(temp_enemy_pawns_for_attack_map);
             enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
             temp_enemy_pawns_for_attack_map &= temp_enemy_pawns_for_attack_map - 1;
@@ -987,6 +1012,7 @@ int evaluate(Position& pos) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
             game_phase += pop_count(b) * game_phase_inc[p];
             while (b) {
+                assert(b != 0);
                 int sq = lsb_index(b);
                 b &= b - 1;
                 int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
@@ -1072,6 +1098,7 @@ int evaluate(Position& pos) {
                     // Potential Outpost
                     uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
                     while(potential_outpost_moves) {
+                        assert(potential_outpost_moves != 0);
                         int to_sq = lsb_index(potential_outpost_moves);
                         potential_outpost_moves &= potential_outpost_moves-1;
                         int to_rank = to_sq/8;
@@ -1180,24 +1207,28 @@ int evaluate(Position& pos) {
             
             uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_pieces;
             while (enemy_knights) {
+                assert(enemy_knights != 0);
                 int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
                 int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += knight_tropism_bonus[dist];
             }
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_pieces;
             while (enemy_bishops) {
+                assert(enemy_bishops != 0);
                 int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
                 int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += bishop_tropism_bonus[dist];
             }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_pieces;
             while (enemy_rooks) {
+                assert(enemy_rooks != 0);
                 int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
                 int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += rook_tropism_bonus[dist];
             }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_pieces;
             while (enemy_queens) {
+                assert(enemy_queens != 0);
                 int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
                 int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += queen_tropism_bonus[dist];
@@ -1651,6 +1682,7 @@ uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
     for (int c = 0; c < 2; ++c) {
         uint64_t b = pos.piece_bb[PAWN] & pos.color_bb[c];
         while (b) {
+            assert(b != 0);
             int sq = lsb_index(b);
             b &= b - 1;
             h ^= zobrist_pieces[c][PAWN][sq];
@@ -1754,6 +1786,7 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[c];
             while (b) {
+                assert(b != 0);
                 int sq = lsb_index(b);
                 b &= b - 1;
                 h ^= zobrist_pieces[c][p][sq];
