@@ -1594,6 +1594,131 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     return best_score;
 }
 
+// --- UCI ---
+Position uci_root_pos;
+Move uci_best_move_overall;
+Move uci_last_root_move = NULL_MOVE;
+
+uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
+    uint64_t h = 0;
+    for (int c = 0; c < 2; ++c) {
+        uint64_t b = pos.piece_bb[PAWN] & pos.color_bb[c];
+        while (b) {
+            int sq = lsb_index(b);
+            b &= b - 1;
+            h ^= zobrist_pieces[c][PAWN][sq];
+        }
+    }
+    return h;
+}
+
+void parse_fen(Position& pos, const std::string& fen_str) {
+    pos = Position(); // Reset position object
+    std::stringstream ss(fen_str);
+    std::string part;
+
+    // 1. Piece placement
+    ss >> part;
+    int rank = 7, file = 0;
+    for (char c : part) {
+        if (std::isdigit(c)) {
+            file += (c - '0');
+        } else if (c == '/') {
+            rank--; file = 0;
+        } else {
+            Piece p_type = NO_PIECE; Color p_color = NO_COLOR;
+            if (std::islower(c)) p_color = BLACK; else p_color = WHITE;
+            char lower_c = std::tolower(c);
+            if (lower_c == 'p') p_type = PAWN; else if (lower_c == 'n') p_type = KNIGHT;
+            else if (lower_c == 'b') p_type = BISHOP; else if (lower_c == 'r') p_type = ROOK;
+            else if (lower_c == 'q') p_type = QUEEN; else if (lower_c == 'k') p_type = KING;
+
+            if (p_type != NO_PIECE && rank >=0 && rank < 8 && file >=0 && file < 8) {
+                int sq = rank * 8 + file;
+                pos.piece_bb[p_type] |= set_bit(sq);
+                pos.color_bb[p_color] |= set_bit(sq);
+            }
+            file++;
+        }
+    }
+
+    // 2. Side to move
+    ss >> part; pos.side_to_move = (part == "w") ? WHITE : BLACK;
+
+    // 3. Castling rights
+    ss >> part; pos.castling_rights = 0;
+    for (char c : part) {
+        if (c == 'K') pos.castling_rights |= WK_CASTLE_MASK;
+        else if (c == 'Q') pos.castling_rights |= WQ_CASTLE_MASK;
+        else if (c == 'k') pos.castling_rights |= BK_CASTLE_MASK;
+        else if (c == 'q') pos.castling_rights |= BQ_CASTLE_MASK;
+    }
+
+    // 4. En passant square
+    ss >> part;
+    if (part != "-") {
+        if (part.length() == 2 && part[0] >= 'a' && part[0] <= 'h' && part[1] >= '1' && part[1] <= '8') {
+            int ep_file = part[0] - 'a';
+            int ep_rank = part[1] - '1';
+            pos.ep_square = ep_rank * 8 + ep_file;
+        } else pos.ep_square = -1;
+    } else pos.ep_square = -1;
+
+    // 5. Halfmove clock
+    if (ss >> part) { try {pos.halfmove_clock = std::stoi(part);} catch(...) {pos.halfmove_clock = 0;} }
+    else pos.halfmove_clock = 0;
+
+    // 6. Fullmove number
+    if (ss >> part) { try {pos.fullmove_number = std::stoi(part);} catch(...){pos.fullmove_number = 1;} }
+    else pos.fullmove_number = 1;
+
+    pos.ply = 0; // Ply at root is 0
+    pos.zobrist_hash = calculate_zobrist_hash(pos);
+    pos.pawn_zobrist_key = calculate_pawn_zobrist_hash(pos);
+    game_history_length = 0;
+    uci_last_root_move = NULL_MOVE;
+}
+
+Move parse_uci_move_from_string(const Position& current_pos, const std::string& uci_move_str) {
+    Move m = NULL_MOVE;
+    if (uci_move_str.length() < 4 || uci_move_str.length() > 5) return m; // Invalid length
+    if (uci_move_str == "0000") return NULL_MOVE; // Null move notation
+
+
+    m.from = (uci_move_str[0] - 'a') + (uci_move_str[1] - '1') * 8;
+    m.to = (uci_move_str[2] - 'a') + (uci_move_str[3] - '1') * 8;
+
+    if (m.from < 0 || m.from > 63 || m.to < 0 || m.to > 63) return NULL_MOVE; // Invalid square
+
+    if (uci_move_str.length() == 5) {
+        char promo_char = uci_move_str[4];
+        if (promo_char == 'q') m.promotion = QUEEN;
+        else if (promo_char == 'n') m.promotion = KNIGHT;
+        else if (promo_char == 'b') m.promotion = BISHOP;
+        else if (promo_char == 'r') m.promotion = ROOK;
+        else return NULL_MOVE; // Invalid promotion character
+    }
+    return m;
+}
+
+uint64_t calculate_zobrist_hash(const Position& pos) {
+    uint64_t h = 0;
+    for (int c = 0; c < 2; ++c) {
+        for (int p = PAWN; p <= KING; ++p) {
+            uint64_t b = pos.piece_bb[p] & pos.color_bb[c];
+            while (b) {
+                int sq = lsb_index(b);
+                b &= b - 1;
+                h ^= zobrist_pieces[c][p][sq];
+            }
+        }
+    }
+    h ^= zobrist_castling[pos.castling_rights];
+    h ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square]; // Use index 64 for no EP
+    if (pos.side_to_move == BLACK) h ^= zobrist_side_to_move;
+    return h;
+}
+
 void uci_loop() {
     char line_buffer[16384]; // Large buffer for UCI commands
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
