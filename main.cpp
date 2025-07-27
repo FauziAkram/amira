@@ -1464,26 +1464,43 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 
 // Search function signature and repetition logic
 int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move) {
+    // 1. PLY GUARD: This must always be first to prevent array overflows.
+    if (ply >= MAX_PLY - 1) {
+        return evaluate(pos);
+    }
+
+    // 2. ABSOLUTE DRAW RULES: Check for non-disputable draws BEFORE probing the TT.
+    if (ply > 0) {
+        if (pos.halfmove_clock >= 100 || is_insufficient_material(pos)) {
+            return 0;
+        }
+        for (int k = ply - 2; k >= 0 && k >= ply - pos.halfmove_clock; k -= 2) {
+            if (search_path_hashes[k] == pos.zobrist_hash) {
+                return 0;
+            }
+        }
+    }
+    
+    // 3. TT PROBE & HASH RECORDING
     search_path_hashes[ply] = pos.zobrist_hash;
+    
+    int original_alpha = alpha; // Declaration is here
+    Move tt_move = NULL_MOVE;   // Declaration is here
+    int tt_score;               // Declaration is here
+    
+    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score)) {
+         return tt_score;
+    }
+
+    // --- The rest of the function continues from here ---
 
     nodes_searched++;
     if (check_time()) return 0;
-    if (ply >= MAX_PLY -1) return evaluate(pos);
     
-    if (pos.halfmove_clock >= 100 && ply > 0) return 0;
-    if (ply > 0 && is_insufficient_material(pos)) return 0;
-
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     if (in_check) depth++;
 
     if (depth <= 0) return quiescence_search(pos, alpha, beta, ply);
-
-    int original_alpha = alpha;
-    Move tt_move = NULL_MOVE;
-    int tt_score;
-    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score)) {
-         return tt_score;
-    }
 
     // --- Modern Pruning Techniques ---
     if (!is_pv_node && !in_check) {
@@ -1550,13 +1567,16 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         legal_moves_played++;
         int score;
 
+        // Repetition check for the *next* position (child node)
         bool is_repetition = false;
-        for (int k = ply - 1; k >= 0; k -= 2) {
+        // Check against the current search path
+        for (int k = ply - 1; k >= 0 && k >= ply - pos.halfmove_clock; k -= 2) {
             if (search_path_hashes[k] == next_pos.zobrist_hash) {
                 is_repetition = true;
                 break;
             }
         }
+        // Check against the game history (for UCI)
         if (!is_repetition) {
             for (int k = 0; k < game_history_length; ++k) {
                 if (game_history_hashes[k] == next_pos.zobrist_hash) {
@@ -1598,25 +1618,19 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 alpha = score;
                 if (score >= beta) {
                     if (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
-                        // Killer move update
                         if (ply < MAX_PLY) {
                             if (!(current_move == killer_moves[ply][0])) {
                                 killer_moves[ply][1] = killer_moves[ply][0];
                                 killer_moves[ply][0] = current_move;
                             }
                         }
-
-                        // Refutation move update
                         if (ply > 0 && !prev_move.is_null()) {
                             refutation_moves[prev_move.from][prev_move.to] = current_move;
                         }
-
-                        // History Heuristic Update
                         int bonus = depth * depth;
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
-                        // Penalize the quiet moves that came before this one
                         for (int j = 0; j < i; ++j) {
                             const Move& bad_move = moves[j];
                             if (pos.piece_on_sq(bad_move.to) == NO_PIECE && bad_move.promotion == NO_PIECE) {
@@ -1626,7 +1640,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         }
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
-                    return beta; // Fail-high
+                    return beta;
                 }
             }
         }
@@ -1640,6 +1654,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
     return best_score;
 }
+
 
 // --- UCI ---
 Position uci_root_pos;
