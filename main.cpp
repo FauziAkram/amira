@@ -1879,7 +1879,7 @@ void uci_loop() {
                     if (!legal) break;
                 }
             }
-        } else if (token == "go") {
+                } else if (token == "go") {
             DebugLog("--- NEW GO COMMAND RECEIVED ---");
 
             if (!g_tt_is_initialized) {
@@ -1887,6 +1887,7 @@ void uci_loop() {
                 g_tt_is_initialized = true;
             }
 
+            // --- Generate a master list of legal moves ---
             Move root_pseudo_moves[256];
             int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
@@ -1902,6 +1903,7 @@ void uci_loop() {
 
             DebugLog("Found " + std::to_string(root_legal_moves.size()) + " legal moves at root.");
 
+            // --- Handle terminal positions immediately ---
             if (root_legal_moves.empty()) {
                 DebugLog("FINAL BESTMOVE SENT: bestmove 0000 (no legal moves)");
                 std::cout << "bestmove 0000\n" << std::flush;
@@ -1913,10 +1915,11 @@ void uci_loop() {
                 continue;
             }
 
-            // (Your time control parsing code remains here, unchanged)
+            // --- Time Control Parsing ---
             long long wtime = -1, btime = -1, winc = 0, binc = 0;
             int movestogo = 0;
             int max_depth_to_search = MAX_PLY;
+
             std::string go_param;
             while(ss >> go_param) {
                 if (go_param == "wtime") ss >> wtime;
@@ -1926,8 +1929,10 @@ void uci_loop() {
                 else if (go_param == "movestogo") ss >> movestogo;
                 else if (go_param == "depth") ss >> max_depth_to_search;
             }
+
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
+
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
 
@@ -1935,35 +1940,18 @@ void uci_loop() {
                 use_time_limits = true;
 
                 if (my_inc > 0) {
-                    // --- INCREMENT TIME CONTROL ---
-                    // Per user request, this original logic is preserved for increment controls.
                     double soft_limit_s = my_time * 0.000052;
                     double hard_limit_s = my_time * 0.00041;
                     soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                     hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
                 } else {
-                    // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
                     int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
                     long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
                     allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
                     if (allocated_time_ms >= my_time) {
-                        allocated_time_ms = my_time - 100; // Leave 100ms
+                        allocated_time_ms = my_time - 100;
                     }
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                 }
@@ -1971,6 +1959,7 @@ void uci_loop() {
                 use_time_limits = false;
             }
 
+            // --- Set a safe default best move ---
             uci_best_move_overall = root_legal_moves[0];
             int best_score_overall = 0;
             int aspiration_alpha = -INF_SCORE;
@@ -1982,16 +1971,29 @@ void uci_loop() {
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move);
 
-                if (stop_search_flag && depth > 1) break;
+                if (stop_search_flag && depth > 1) {
+                    DebugLog("Search stopped at depth " + std::to_string(depth));
+                    break;
+                }
 
-                // (Aspiration window logic unchanged)
-                if (std::abs(current_score) < MATE_THRESHOLD) { /*...*/ } else { /*...*/ }
+                if (std::abs(current_score) < MATE_THRESHOLD && current_score > -INF_SCORE && current_score < INF_SCORE) {
+                    aspiration_alpha = current_score - aspiration_window_delta;
+                    aspiration_beta = current_score + aspiration_window_delta;
+                    aspiration_window_delta += aspiration_window_delta / 3 + 5;
+                    if (aspiration_window_delta > 300) aspiration_window_delta = 300;
+                } else {
+                    aspiration_alpha = -INF_SCORE;
+                    aspiration_beta = INF_SCORE;
+                    aspiration_window_delta = 50;
+                }
 
+                // --- Validate the TT move before accepting it ---
                 Move candidate_move = NULL_MOVE;
                 TTEntry& root_entry = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
                 if (root_entry.hash == uci_root_pos.zobrist_hash) {
                     candidate_move = root_entry.best_move;
                 }
+
                 bool candidate_is_legal = false;
                 if (!candidate_move.is_null()) {
                     for (const Move& legal_move : root_legal_moves) {
@@ -2008,15 +2010,59 @@ void uci_loop() {
                 best_score_overall = current_score;
 
                 DebugLog("Depth " + std::to_string(depth) + " complete. Score: " + std::to_string(best_score_overall) + ". Current best move: " + move_to_uci(uci_best_move_overall));
+                
+                auto now_tp = std::chrono::steady_clock::now();
+                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
+                if (elapsed_ms < 0) elapsed_ms = 0;
 
-                // (Your PV printing and time limit checks remain here, unchanged)
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
-                // ...
+                if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
+                else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2;
+                std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
+                if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
+
+                if (!uci_best_move_overall.is_null()) {
+                    std::cout << " pv";
+                    Position temp_pos = uci_root_pos;
+                    std::vector<uint64_t> pv_hashes;
+                    pv_hashes.push_back(temp_pos.zobrist_hash);
+                    for (int pv_idx = 0; pv_idx < depth; ++pv_idx) {
+                        Move pv_m; int pv_s; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
+                        if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s) && !pv_m.is_null()) {
+                            bool legal_pv;
+                            Position next_temp_pos = make_move(temp_pos, pv_m, legal_pv);
+                            bool is_cycle = false;
+                            for(uint64_t hash : pv_hashes) { if (hash == next_temp_pos.zobrist_hash) { is_cycle = true; break; } }
+                            if (is_cycle) { break; }
+                            if (legal_pv) {
+                                std::cout << " " << move_to_uci(pv_m);
+                                temp_pos = next_temp_pos;
+                                pv_hashes.push_back(temp_pos.zobrist_hash);
+                            } else {
+                                if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
+                                break;
+                            }
+                        } else {
+                            if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
+                            break;
+                        }
+                        if (stop_search_flag) break;
+                    }
+                }
                 std::cout << '\n' << std::flush;
 
-                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) break;
-                if (std::abs(best_score_overall) > MATE_THRESHOLD) break;
-                if (depth >= max_depth_to_search) break;
+                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
+                    DebugLog("Search stopped on time limit.");
+                    break;
+                }
+                if (std::abs(best_score_overall) > MATE_THRESHOLD && depth > 1) {
+                    DebugLog("Search stopped due to mate score.");
+                    break;
+                }
+                if (depth >= max_depth_to_search) {
+                     DebugLog("Search stopped due to reaching max depth.");
+                     break;
+                }
             }
 
             DebugLog("FINAL BESTMOVE SENT: bestmove " + move_to_uci(uci_best_move_overall));
@@ -2030,6 +2076,7 @@ void uci_loop() {
 }
 
 int main(int argc, char* argv[]) {
+    std::cout.setf(std::ios::unitbuf);
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
 
@@ -2040,6 +2087,8 @@ int main(int argc, char* argv[]) {
     init_pawn_cache();
     reset_search_heuristics();
 
+    DebugLog("--- ENGINE STARTED ---");
     uci_loop();
+    DebugLog("--- ENGINE EXITED ---");
     return 0;
 }
