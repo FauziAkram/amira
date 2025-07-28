@@ -1574,7 +1574,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             } else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
-                if (depth >= 3 && i >= 1 && !in_check && current_move.promotion == NO_PIECE &&
+                if (depth >= 3 && depth < MAX_PLY && i >= 1 && !in_check && current_move.promotion == NO_PIECE &&
                     pos.piece_on_sq(current_move.to) == NO_PIECE) {
                     R_lmr = search_reductions[depth][i];
                 }
@@ -1775,7 +1775,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.4\n";
+            std::cout << "id name Amira 1.41\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
