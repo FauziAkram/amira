@@ -71,7 +71,6 @@ void clear_pawn_cache() {
     }
 }
 
-
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
 uint64_t zobrist_castling[16];
@@ -541,7 +540,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.piece_bb[piece_captured] &= ~to_bb;
         next_pos.color_bb[opp] &= ~to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[opp][piece_captured][move.to];
-        if(piece_captured == PAWN) {
+        if (piece_captured == PAWN) {
             next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][move.to];
         }
         next_pos.halfmove_clock = 0;
@@ -1076,8 +1075,8 @@ int evaluate(Position& pos) {
                         potential_outpost_moves &= potential_outpost_moves-1;
                         int to_rank = to_sq/8;
                         int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
-                        if(to_relative_rank >= 3 && to_relative_rank <=5) {
-                            if(get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
+                        if (to_relative_rank >= 3 && to_relative_rank <=5) {
+                            if (get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
                                 mg_score += side_multiplier * potential_dominance_bonus;
                                 break; // Only count once per piece
                             }
@@ -1482,7 +1481,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move tt_move = NULL_MOVE;
     int tt_score;
     if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score)) {
-         return tt_score;
+        return tt_score;
     }
 
     // --- Modern Pruning Techniques ---
@@ -2022,7 +2021,7 @@ void uci_loop() {
                                 if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                                 break;
                             }
-                        } else { 
+                        } else {
                             if (pv_idx == 0) std::cout << " " << move_to_uci(uci_best_move_overall);
                             break;
                         }
@@ -2048,7 +2047,7 @@ void uci_loop() {
                     const auto& m_fall = legal_moves_fallback[i];
                     bool is_leg_fall;
                     make_move(uci_root_pos, m_fall, is_leg_fall);
-                    if(is_leg_fall) {
+                    if (is_leg_fall) {
                         std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
                         found_one_legal_fallback = true;
                         break;
