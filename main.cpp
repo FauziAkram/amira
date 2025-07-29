@@ -1668,8 +1668,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition)
             score = 0;
         else {
-            bool is_capture = (pos.piece_on_sq(current_move.to) != NO_PIECE || current_move.promotion != NO_PIECE);
-            bool is_quiet = !is_capture;
+            bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
 
             if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
