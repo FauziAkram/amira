@@ -68,9 +68,8 @@ void init_pawn_cache() {
 }
 
 void clear_pawn_cache() {
-     if (!pawn_evaluation_cache.empty()) {
+     if (!pawn_evaluation_cache.empty())
         std::memset(pawn_evaluation_cache.data(), 0, pawn_evaluation_cache.size() * sizeof(PawnCacheEntry));
-    }
 }
 
 // --- Zobrist Hashing ---
@@ -337,9 +336,8 @@ void init_magic_bitboards() {
             for (int j = 0; j < num_mask_bits; ++j) {
                 int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
-                if ((i >> j) & 1) {
+                if ((i >> j) & 1)
                     blockers |= set_bit(bit_pos);
-                }
             }
             uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
             magic_rook_indices[sq][index] = reference_rook_attacks(sq, blockers);
@@ -354,9 +352,8 @@ void init_magic_bitboards() {
             for (int j = 0; j < num_mask_bits; ++j) {
                 int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
-                if ((i >> j) & 1) {
+                if ((i >> j) & 1)
                     blockers |= set_bit(bit_pos);
-                }
             }
             uint64_t index = (blockers * magic_bishop[sq]) >> magic_bishop_shift[sq];
             magic_bishop_indices[sq][index] = reference_bishop_attacks(sq, blockers);
@@ -440,36 +437,31 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
             if (rank == promotion_rank_idx) { // Reached promotion rank by one step
                 moves_list[move_count++] = {from, one_step_sq, QUEEN}; moves_list[move_count++] = {from, one_step_sq, ROOK};
                 moves_list[move_count++] = {from, one_step_sq, BISHOP}; moves_list[move_count++] = {from, one_step_sq, KNIGHT};
-            } else if (!captures_only) {
+            } else if (!captures_only)
                 moves_list[move_count++] = {from, one_step_sq};
-            }
             // Double pawn push (only if single push is also possible and not captures_only)
             if (!captures_only) {
                 int start_rank_idx = (stm == WHITE) ? 1 : 6;
                 if (rank == start_rank_idx) {
                     int two_steps_sq = (stm == WHITE) ? from + 16 : from - 16;
-                    if (two_steps_sq >=0 && two_steps_sq < 64 && get_bit(empty_squares, two_steps_sq)) {
+                    if (two_steps_sq >=0 && two_steps_sq < 64 && get_bit(empty_squares, two_steps_sq))
                         moves_list[move_count++] = {from, two_steps_sq};
-                    }
                 }
             }
         }
         // Pawn captures (including EP)
         uint64_t pawn_cap_targets = pawn_attacks_bb[stm][from] & opp_pieces;
-        if (pos.ep_square != -1) {
-             if (get_bit(pawn_attacks_bb[stm][from], pos.ep_square)) { // Is the EP square a valid capture target?
+        if (pos.ep_square != -1)
+             if (get_bit(pawn_attacks_bb[stm][from], pos.ep_square)) // Is the EP square a valid capture target?
                  pawn_cap_targets |= set_bit(pos.ep_square);
-             }
-        }
         while (pawn_cap_targets) {
             int to = lsb_index(pawn_cap_targets);
             pawn_cap_targets &= pawn_cap_targets - 1;
             if (rank == promotion_rank_idx) { // Reached promotion rank by capture
                 moves_list[move_count++] = {from, to, QUEEN}; moves_list[move_count++] = {from, to, ROOK};
                 moves_list[move_count++] = {from, to, BISHOP}; moves_list[move_count++] = {from, to, KNIGHT};
-            } else {
+            } else
                 moves_list[move_count++] = {from, to};
-            }
         }
     }
 
@@ -504,25 +496,21 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
             if (stm == WHITE) {
                 if ((pos.castling_rights & WK_CASTLE_MASK) && king_sq_idx == E1_SQ &&
                     !get_bit(occupied, E1_SQ + 1) && !get_bit(occupied, E1_SQ + 2) && // F1, G1 empty
-                    !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ + 1, BLACK) && !is_square_attacked(pos, E1_SQ + 2, BLACK)) {
+                    !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ + 1, BLACK) && !is_square_attacked(pos, E1_SQ + 2, BLACK))
                     moves_list[move_count++] = {king_sq_idx, E1_SQ + 2}; // King to G1
-                }
                 if ((pos.castling_rights & WQ_CASTLE_MASK) && king_sq_idx == E1_SQ &&
                     !get_bit(occupied, E1_SQ - 1) && !get_bit(occupied, E1_SQ - 2) && !get_bit(occupied, E1_SQ - 3) && // D1, C1, B1 empty
-                    !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ - 1, BLACK) && !is_square_attacked(pos, E1_SQ - 2, BLACK)) {
+                    !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ - 1, BLACK) && !is_square_attacked(pos, E1_SQ - 2, BLACK))
                     moves_list[move_count++] = {king_sq_idx, E1_SQ - 2}; // King to C1
-                }
             } else { // BLACK
                 if ((pos.castling_rights & BK_CASTLE_MASK) && king_sq_idx == E8_SQ &&
                     !get_bit(occupied, E8_SQ + 1) && !get_bit(occupied, E8_SQ + 2) && // F8, G8 empty
-                    !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ + 1, WHITE) && !is_square_attacked(pos, E8_SQ + 2, WHITE)) {
+                    !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ + 1, WHITE) && !is_square_attacked(pos, E8_SQ + 2, WHITE))
                     moves_list[move_count++] = {king_sq_idx, E8_SQ + 2}; // King to G8
-                }
                 if ((pos.castling_rights & BQ_CASTLE_MASK) && king_sq_idx == E8_SQ &&
                     !get_bit(occupied, E8_SQ - 1) && !get_bit(occupied, E8_SQ - 2) && !get_bit(occupied, E8_SQ - 3) && // D8, C8, B8 empty
-                    !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ - 1, WHITE) && !is_square_attacked(pos, E8_SQ - 2, WHITE)) {
+                    !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ - 1, WHITE) && !is_square_attacked(pos, E8_SQ - 2, WHITE))
                     moves_list[move_count++] = {king_sq_idx, E8_SQ - 2}; // King to C8
-                }
             }
         }
     }
@@ -660,9 +648,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     int king_sq_after_move = lsb_index(next_pos.piece_bb[KING] & next_pos.color_bb[stm]); // King of the side that just MOVED
     if (king_sq_after_move == -1) { /* Should not happen */ return pos; }
-    if (is_square_attacked(next_pos, king_sq_after_move, opp)) { // Check if own king is attacked by opponent
+    if (is_square_attacked(next_pos, king_sq_after_move, opp)) // Check if own king is attacked by opponent
         return pos; // Illegal move, king left in check
-    }
 
     legal_move_flag = true;
     return next_pos;
@@ -1169,28 +1156,25 @@ int evaluate(Position& pos) {
 
                     if (!friendly_pawns_on_file) {
                         shelter_score += SHIELD_PAWN_MISSING_PENALTY;
-                        if (!(file_bb_mask[f] & all_enemy_pawns)) {
+                        if (!(file_bb_mask[f] & all_enemy_pawns))
                             shelter_score += SHIELD_OPEN_FILE_PENALTY;
-                        }
                     } else {
                         bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
                         bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
 
-                        if (pawn_on_shield_rank_1) {
+                        if (pawn_on_shield_rank_1)
                             shelter_score += SHIELD_PAWN_PRESENT_BONUS;
-                        } else if (pawn_on_shield_rank_2) {
+                        else if (pawn_on_shield_rank_2)
                             shelter_score += SHIELD_PAWN_ADVANCED_PENALTY;
-                        } else {
+                        else
                             shelter_score += SHIELD_PAWN_MISSING_PENALTY;
-                        }
                     }
                 }
             }
 
             int home_rank = (current_eval_color == WHITE) ? 0 : 7;
-            if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58))) {
+            if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
                 mg_score += side_multiplier * shelter_score;
-            }
 
             // PART 2: King Threat Assessment via Piece Tropism
             int attack_proximity_score = 0;
@@ -1273,9 +1257,8 @@ void init_tt(size_t mb_size) {
     }
 
     size_t power_of_2_entries = 1;
-    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries) {
+    while (power_of_2_entries * 2 <= num_entries && power_of_2_entries * 2 > power_of_2_entries)
         power_of_2_entries *= 2;
-    }
 
      if (power_of_2_entries == 0) { // Should not happen if num_entries > 0
          transposition_table.clear(); tt_mask = 0; return;
@@ -1290,9 +1273,8 @@ void init_tt(size_t mb_size) {
 }
 
 void clear_tt() {
-    if (!transposition_table.empty()) {
+    if (!transposition_table.empty())
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
-    }
 }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
@@ -1332,9 +1314,8 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
         entry.depth = depth;
         entry.score = score;
         entry.bound = bound;
-        if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER) {
+        if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER)
              entry.best_move = best_move;
-        }
     }
 }
 
@@ -1415,11 +1396,10 @@ int see(const Position& pos, const Move& move) {
 
     Color stm = pos.color_on_sq(move.from);
     Piece captured_piece_type = pos.piece_on_sq(move.to);
-    if(move.promotion != NO_PIECE) {
+    if(move.promotion != NO_PIECE)
         gain[d] = see_piece_values[move.promotion];
-    } else {
+    else
         gain[d] = see_piece_values[captured_piece_type];
-    }
     
     Piece attacking_piece_type = pos.piece_on_sq(move.from);
 
@@ -1457,9 +1437,8 @@ int see(const Position& pos, const Move& move) {
         d++;
     }
 
-    while (--d) {
+    while (--d)
         gain[d-1] = -std::max(-gain[d-1], gain[d]);
-    }
     return gain[0];
 }
 
@@ -1518,34 +1497,29 @@ void MovePicker::score_all_moves() {
                 Piece captured = m_pos.piece_on_sq(m.to);
                 if (captured == NO_PIECE) captured = PAWN; // En-passant case
                 m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
-             } else {
+             } else
                  m.score = -1000000; // Bad capture
-             }
         } else { // Quiet moves
-            if (!refutation.is_null() && m == refutation) {
+            if (!refutation.is_null() && m == refutation)
                 m.score = 1000000;
-            } else if (m_ply < MAX_PLY && !killer_moves[m_ply][0].is_null() && m == killer_moves[m_ply][0]) {
+            else if (m_ply < MAX_PLY && !killer_moves[m_ply][0].is_null() && m == killer_moves[m_ply][0])
                 m.score = 900000;
-            } else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1]) {
+            else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1])
                 m.score = 800000;
-            } else {
+            else
                 m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
-            }
         }
     }
 }
 
 Move MovePicker::next_move() {
-    if (m_current_idx >= m_move_count) {
+    if (m_current_idx >= m_move_count)
         return NULL_MOVE;
-    }
 
     int best_idx = m_current_idx;
-    for (int i = m_current_idx + 1; i < m_move_count; ++i) {
-        if (m_moves[i].score > m_moves[best_idx].score) {
+    for (int i = m_current_idx + 1; i < m_move_count; ++i)
+        if (m_moves[i].score > m_moves[best_idx].score)
             best_idx = i;
-        }
-    }
 
     std::swap(m_moves[m_current_idx], m_moves[best_idx]);
     return m_moves[m_current_idx++];
@@ -1559,9 +1533,9 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     int stand_pat_score;
 
-    if (in_check) {
+    if (in_check)
         stand_pat_score = -INF_SCORE + ply; // If in check, we must make a move
-    } else {
+    else {
         stand_pat_score = evaluate(pos);
         if (stand_pat_score >= beta) return beta; // Fail-high
         if (alpha < stand_pat_score) alpha = stand_pat_score;
@@ -1588,9 +1562,8 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     }
 
     // If in check and no legal moves found, it's mate
-    if (in_check && legal_moves_in_qsearch == 0) {
+    if (in_check && legal_moves_in_qsearch == 0)
         return -MATE_SCORE + ply; // Mate score (deeper mates are worse)
-    }
 
     return alpha;
 }
@@ -1626,9 +1599,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
             int futility_margin = 90 + 60 * depth;
-            if (static_eval - futility_margin >= beta) {
+            if (static_eval - futility_margin >= beta)
                 return beta; 
-            }
         }
 
         // Razoring
@@ -1636,9 +1608,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             int razoring_margin = 250 + 80 * (depth-1);
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
-                if (q_score < alpha) {
+                if (q_score < alpha)
                     return alpha;
-                }
             }
         }
     }
@@ -1700,9 +1671,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
 
-        if (is_repetition) {
+        if (is_repetition)
             score = 0;
-        } else {
+        else {
             bool is_capture = (pos.piece_on_sq(current_move.to) != NO_PIECE || current_move.promotion != NO_PIECE);
             bool is_quiet = !is_capture;
 
@@ -1710,9 +1681,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 quiet_moves_for_history.push_back(current_move);
             }
 
-            if (legal_moves_played == 1) { // PVS: First move gets full window search
+            if (legal_moves_played == 1) // PVS: First move gets full window search
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
-            } else {
+            else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
                 if (depth >= 3 && depth < MAX_PLY && legal_moves_played > 1 && is_quiet) {
@@ -1728,12 +1699,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
                 score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
                 
-                if (score > alpha && R_lmr > 0) { // Re-search if reduction was too aggressive
+                if (score > alpha && R_lmr > 0) // Re-search if reduction was too aggressive
                      score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_move);
-                }
-                if (score > alpha && score < beta) {
+                if (score > alpha && score < beta)
                      score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_move);
-                }
             }
         }
 
@@ -1755,9 +1724,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         }
 
                         // Refutation move update
-                        if (ply > 0 && !prev_move.is_null()) {
+                        if (ply > 0 && !prev_move.is_null())
                             refutation_moves[prev_move.from][prev_move.to] = current_move;
-                        }
 
                         // History Heuristic Update
                         int bonus = depth * depth;
@@ -1921,7 +1889,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.43\n";
+            std::cout << "id name Amira 1.44\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1994,14 +1962,12 @@ void uci_loop() {
                     if (m.is_null() && move_str_uci != "0000") break;
                     if (m.is_null() && move_str_uci == "0000") break;
 
-                    if (game_history_length < 256) {
+                    if (game_history_length < 256)
                         game_history_hashes[game_history_length++] = uci_root_pos.zobrist_hash;
-                    }
                     Piece moved_piece = uci_root_pos.piece_on_sq(m.from);
                     Piece captured_piece = uci_root_pos.piece_on_sq(m.to);
-                    if (moved_piece == PAWN || captured_piece != NO_PIECE) {
+                    if (moved_piece == PAWN || captured_piece != NO_PIECE)
                         game_history_length = 0;
-                    }
 
                     bool legal;
                     uci_last_root_move = m;
@@ -2022,9 +1988,8 @@ void uci_loop() {
                 const Move& m = root_pseudo_moves[i];
                 bool is_legal_flag;
                 make_move(uci_root_pos, m, is_legal_flag);
-                if (is_legal_flag) {
+                if (is_legal_flag)
                     root_legal_moves.push_back(m);
-                }
             }
 
             if (root_legal_moves.size() == 1) {
@@ -2083,9 +2048,8 @@ void uci_loop() {
                     allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
                     
                     // Final safety buffer: always leave a small amount of time on the clock.
-                    if (allocated_time_ms >= my_time) {
+                    if (allocated_time_ms >= my_time)
                         allocated_time_ms = my_time - 100; // Leave 100ms
-                    }
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
                     
                     // For simplicity, we use the same time for both soft and hard limits.
@@ -2093,9 +2057,8 @@ void uci_loop() {
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                 }
-            } else {
+            } else
                 use_time_limits = false;
-            }
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
@@ -2138,9 +2101,8 @@ void uci_loop() {
                 } else {
                      best_score_overall = current_score;
                      TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
-                     if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null()) {
+                     if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null())
                          uci_best_move_overall = root_entry_check.best_move;
-                     }
                 }
 
                 auto now_tp = std::chrono::steady_clock::now();
@@ -2177,16 +2139,15 @@ void uci_loop() {
                 }
                 std::cout << std::endl;
 
-                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint) {
+                if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint)
                     break;
-                }
                 if (std::abs(best_score_overall) > MATE_THRESHOLD && depth > 1) break;
                 if (depth >= max_depth_to_search) break;
             }
 
-            if (!uci_best_move_overall.is_null()) {
+            if (!uci_best_move_overall.is_null())
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
-            } else {
+            else {
                 Move legal_moves_fallback[256];
                 int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
                 bool found_one_legal_fallback = false;
@@ -2200,9 +2161,8 @@ void uci_loop() {
                         break;
                     }
                 }
-                if (!found_one_legal_fallback) {
+                if (!found_one_legal_fallback)
                      std::cout << "bestmove 0000\n" << std::flush;
-                }
             }
 
         } else if (token == "quit" || token == "stop") {
