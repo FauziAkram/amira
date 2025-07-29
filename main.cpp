@@ -185,9 +185,8 @@ struct Position {
         if (sq < 0 || sq >= 64) return NO_PIECE;
         uint64_t b = set_bit(sq);
         if (!( (color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
-        for (int p = PAWN; p <= KING; ++p) {
+        for (int p = PAWN; p <= KING; ++p)
             if (piece_bb[p] & b) return (Piece)p;
-        }
         return NO_PIECE; // Should not be reached if occupied bit was set
     }
     Color color_on_sq(int sq) const {
@@ -545,9 +544,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.piece_bb[piece_captured] &= ~to_bb;
         next_pos.color_bb[opp] &= ~to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[opp][piece_captured][move.to];
-        if (piece_captured == PAWN) {
+        if (piece_captured == PAWN)
             next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][move.to];
-        }
         next_pos.halfmove_clock = 0;
     }
     if (piece_moved == PAWN) {
@@ -565,9 +563,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
     next_pos.ep_square = -1;
-    if (piece_moved == PAWN && std::abs(move.to - move.from) == 16) {
+    if (piece_moved == PAWN && std::abs(move.to - move.from) == 16)
         next_pos.ep_square = (stm == WHITE) ? move.from + 8 : move.from - 8;
-    }
     next_pos.zobrist_hash ^= zobrist_ep[(next_pos.ep_square == -1) ? 64 : next_pos.ep_square];
 
     if (move.promotion != NO_PIECE) {
@@ -580,9 +577,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
     } else {
-        if (piece_moved == PAWN) {
+        if (piece_moved == PAWN)
              next_pos.pawn_zobrist_key ^= zobrist_pieces[stm][PAWN][move.to];
-        }
         next_pos.piece_bb[piece_moved] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
@@ -1677,9 +1673,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             bool is_capture = (pos.piece_on_sq(current_move.to) != NO_PIECE || current_move.promotion != NO_PIECE);
             bool is_quiet = !is_capture;
 
-            if (is_quiet) {
+            if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
-            }
 
             if (legal_moves_played == 1) // PVS: First move gets full window search
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
@@ -1688,9 +1683,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 // Late Move Reductions (LMR) with table
                 if (depth >= 3 && depth < MAX_PLY && legal_moves_played > 1 && is_quiet) {
                     bool improving = false;
-                    if (ply >= 2 && !in_check) {
+                    if (ply >= 2 && !in_check)
                         improving = static_eval > search_path_evals[ply-2];
-                    }
                     R_lmr = search_reductions[depth][legal_moves_played];
                     if (!improving) R_lmr++; // More reduction if not improving
                     if (is_pv_node) R_lmr--; // Less reduction in PV nodes
@@ -1746,9 +1740,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         }
     }
 
-    if (legal_moves_played == 0) {
+    if (legal_moves_played == 0)
         return in_check ? (-MATE_SCORE + ply) : 0;
-    }
 
     TTBound final_bound_type = (best_score > original_alpha) ? TT_EXACT : TT_UPPER;
     store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
@@ -1844,7 +1837,6 @@ Move parse_uci_move_from_string(const Position& current_pos, const std::string& 
     Move m = NULL_MOVE;
     if (uci_move_str.length() < 4 || uci_move_str.length() > 5) return m; // Invalid length
     if (uci_move_str == "0000") return NULL_MOVE; // Null move notation
-
 
     m.from = (uci_move_str[0] - 'a') + (uci_move_str[1] - '1') * 8;
     m.to = (uci_move_str[2] - 'a') + (uci_move_str[3] - '1') * 8;
@@ -2107,7 +2099,7 @@ void uci_loop() {
 
                 auto now_tp = std::chrono::steady_clock::now();
                 auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
-                if (elapsed_ms < 0) elapsed_ms = 0;
+                if (elapsed_ms <= 0) elapsed_ms = 1;
 
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
                 if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
