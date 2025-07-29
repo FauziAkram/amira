@@ -113,18 +113,17 @@ std::string move_to_uci(const Move& move) {
     uci_move_str += (char)('a' + (move.to % 8));
     uci_move_str += (char)('1' + (move.to / 8));
     if (move.promotion != NO_PIECE) {
-        char promo_char = 'q';
-        if (move.promotion == KNIGHT) promo_char = 'n';
-        else if (move.promotion == BISHOP) promo_char = 'b';
-        else if (move.promotion == ROOK) promo_char = 'r';
+        const char promo_char = (move.promotion == KNIGHT) ? 'n' :
+                                (move.promotion == BISHOP) ? 'b' :
+                                (move.promotion == ROOK)   ? 'r' : 'q';
         uci_move_str += promo_char;
     }
     return uci_move_str;
 }
 
 // --- Bitboard Utilities ---
-inline uint64_t set_bit(int sq) { return 1ULL << sq; }
-inline bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
+constexpr uint64_t set_bit(int sq) { return 1ULL << sq; }
+constexpr bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
 inline int pop_count(uint64_t bb) {
 #if defined(_MSC_VER)
     return static_cast<int>(__popcnt64(bb));
@@ -148,14 +147,14 @@ inline int lsb_index(uint64_t bb) {
 #endif
 }
 
-uint64_t north(uint64_t b) { return b << 8; }
-uint64_t south(uint64_t b) { return b >> 8; }
-uint64_t east(uint64_t b) { return (b << 1) & ~0x0101010101010101ULL; }
-uint64_t west(uint64_t b) { return (b >> 1) & ~0x8080808080808080ULL; }
-uint64_t nw(uint64_t b) { return north(west(b)); }
-uint64_t ne(uint64_t b) { return north(east(b)); }
-uint64_t sw(uint64_t b) { return south(west(b)); }
-uint64_t se(uint64_t b) { return south(east(b)); }
+constexpr uint64_t north(uint64_t b) { return b << 8; }
+constexpr uint64_t south(uint64_t b) { return b >> 8; }
+constexpr uint64_t east(uint64_t b) { return (b << 1) & ~0x0101010101010101ULL; }
+constexpr uint64_t west(uint64_t b) { return (b >> 1) & ~0x8080808080808080ULL; }
+constexpr uint64_t nw(uint64_t b) { return north(west(b)); }
+constexpr uint64_t ne(uint64_t b) { return north(east(b)); }
+constexpr uint64_t sw(uint64_t b) { return south(west(b)); }
+constexpr uint64_t se(uint64_t b) { return south(east(b)); }
 
 // --- Board Representation ---
 struct Position {
@@ -183,7 +182,7 @@ struct Position {
 
     Piece piece_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_PIECE;
-        uint64_t b = set_bit(sq);
+        const uint64_t b = set_bit(sq);
         if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
         for (int p = PAWN; p <= KING; ++p)
             if (piece_bb[p] & b) return (Piece)p;
@@ -191,7 +190,7 @@ struct Position {
     }
     Color color_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_COLOR;
-        uint64_t b = set_bit(sq);
+        const uint64_t b = set_bit(sq);
         if (color_bb[WHITE] & b) return WHITE;
         if (color_bb[BLACK] & b) return BLACK;
         return NO_COLOR;
@@ -205,7 +204,7 @@ uint64_t king_attacks_bb[64];
 
 void init_attack_tables() {
     for (int sq = 0; sq < 64; ++sq) {
-        uint64_t b = set_bit(sq);
+        const uint64_t b = set_bit(sq);
         pawn_attacks_bb[WHITE][sq] = nw(b) | ne(b);
         pawn_attacks_bb[BLACK][sq] = sw(b) | se(b);
 
@@ -293,11 +292,11 @@ uint64_t* magic_bishop_indices[64] = {
 uint64_t reference_rook_attacks(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
     const int deltas[] = {1, -1, 8, -8};
-    for (int d : deltas) {
+    for (const int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
+            const int r_curr = s / 8, c_curr = s % 8;
+            const int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
             if (std::abs(d) == 1 && r_curr != r_prev) break;
             if (std::abs(d) == 8 && c_curr != c_prev) break;
             attacks |= set_bit(s);
@@ -310,11 +309,11 @@ uint64_t reference_rook_attacks(int sq, uint64_t occupied) {
 uint64_t reference_bishop_attacks(int sq, uint64_t occupied) {
     uint64_t attacks = 0;
     const int deltas[] = {9, -9, 7, -7};
-    for (int d : deltas) {
+    for (const int d : deltas) {
         for (int s = sq + d; ; s += d) {
             if (s < 0 || s >= 64) break;
-            int r_curr = s / 8, c_curr = s % 8;
-            int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
+            const int r_curr = s / 8, c_curr = s % 8;
+            const int r_prev = (s-d) / 8, c_prev = (s-d) % 8;
             if (std::abs(r_curr - r_prev) != 1 || std::abs(c_curr - c_prev) != 1) break;
             attacks |= set_bit(s);
             if (get_bit(occupied, s)) break;
@@ -327,34 +326,34 @@ uint64_t reference_bishop_attacks(int sq, uint64_t occupied) {
 void init_magic_bitboards() {
     for (int sq = 0; sq < 64; ++sq) {
         // Initialize rook magics
-        uint64_t mask = magic_rook_mask[sq];
-        int num_mask_bits = pop_count(mask);
-        for (int i = 0; i < (1 << num_mask_bits); ++i) {
+        const uint64_t rook_mask = magic_rook_mask[sq];
+        const int num_rook_mask_bits = pop_count(rook_mask);
+        for (int i = 0; i < (1 << num_rook_mask_bits); ++i) {
             uint64_t blockers = 0;
-            uint64_t temp_mask = mask;
-            for (int j = 0; j < num_mask_bits; ++j) {
-                int bit_pos = lsb_index(temp_mask);
+            uint64_t temp_mask = rook_mask;
+            for (int j = 0; j < num_rook_mask_bits; ++j) {
+                const int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
                 if ((i >> j) & 1)
                     blockers |= set_bit(bit_pos);
             }
-            uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
+            const uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
             magic_rook_indices[sq][index] = reference_rook_attacks(sq, blockers);
         }
 
         // Initialize bishop magics
-        mask = magic_bishop_mask[sq];
-        num_mask_bits = pop_count(mask);
-        for (int i = 0; i < (1 << num_mask_bits); ++i) {
+        const uint64_t bishop_mask = magic_bishop_mask[sq];
+        const int num_bishop_mask_bits = pop_count(bishop_mask);
+        for (int i = 0; i < (1 << num_bishop_mask_bits); ++i) {
             uint64_t blockers = 0;
-            uint64_t temp_mask = mask;
-            for (int j = 0; j < num_mask_bits; ++j) {
-                int bit_pos = lsb_index(temp_mask);
+            uint64_t temp_mask = bishop_mask;
+            for (int j = 0; j < num_bishop_mask_bits; ++j) {
+                const int bit_pos = lsb_index(temp_mask);
                 temp_mask &= temp_mask - 1;
                 if ((i >> j) & 1)
                     blockers |= set_bit(bit_pos);
             }
-            uint64_t index = (blockers * magic_bishop[sq]) >> magic_bishop_shift[sq];
+            const uint64_t index = (blockers * magic_bishop[sq]) >> magic_bishop_shift[sq];
             magic_bishop_indices[sq][index] = reference_bishop_attacks(sq, blockers);
         }
     }
@@ -362,14 +361,14 @@ void init_magic_bitboards() {
 
 
 inline uint64_t get_rook_attacks(int sq, uint64_t occupied) {
-    uint64_t blockers = occupied & magic_rook_mask[sq];
-    uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
+    const uint64_t blockers = occupied & magic_rook_mask[sq];
+    const uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
     return magic_rook_indices[sq][index];
 }
 
 inline uint64_t get_bishop_attacks(int sq, uint64_t occupied) {
-    uint64_t blockers = occupied & magic_bishop_mask[sq];
-    uint64_t index = (blockers * magic_bishop[sq]) >> magic_bishop_shift[sq];
+    const uint64_t blockers = occupied & magic_bishop_mask[sq];
+    const uint64_t index = (blockers * magic_bishop[sq]) >> magic_bishop_shift[sq];
     return magic_bishop_indices[sq][index];
 }
 
@@ -379,21 +378,21 @@ inline uint64_t get_queen_attacks(int sq, uint64_t occupied) {
 
 // --- is_square_attacked (updated with magic bitboards) ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
-    uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
+    const uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
     if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
 
-    uint64_t attacker_knights = pos.piece_bb[KNIGHT] & pos.color_bb[attacker_c];
+    const uint64_t attacker_knights = pos.piece_bb[KNIGHT] & pos.color_bb[attacker_c];
     if (knight_attacks_bb[sq_to_check] & attacker_knights) return true;
 
-    uint64_t attacker_king = pos.piece_bb[KING] & pos.color_bb[attacker_c];
+    const uint64_t attacker_king = pos.piece_bb[KING] & pos.color_bb[attacker_c];
     if (king_attacks_bb[sq_to_check] & attacker_king) return true;
 
-    uint64_t occupied = pos.get_occupied_bb();
+    const uint64_t occupied = pos.get_occupied_bb();
 
-    uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
+    const uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
     if (get_rook_attacks(sq_to_check, occupied) & rook_queen_attackers) return true;
 
-    uint64_t bishop_queen_attackers = (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
+    const uint64_t bishop_queen_attackers = (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
     if (get_bishop_attacks(sq_to_check, occupied) & bishop_queen_attackers) return true;
 
     return false;
@@ -415,23 +414,23 @@ uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occu
 // --- Move Generation (updated with magic bitboards) --- //
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     int move_count = 0;
-    int stm = pos.side_to_move;
-    Color friendly_color = (Color)stm;
-    Color enemy_color = (Color)(1 - stm);
-    uint64_t my_pieces = pos.color_bb[friendly_color];
-    uint64_t opp_pieces = pos.color_bb[enemy_color];
-    uint64_t occupied = my_pieces | opp_pieces;
-    uint64_t empty_squares = ~occupied;
+    const int stm = pos.side_to_move;
+    const Color friendly_color = (Color)stm;
+    const Color enemy_color = (Color)(1 - stm);
+    const uint64_t my_pieces = pos.color_bb[friendly_color];
+    const uint64_t opp_pieces = pos.color_bb[enemy_color];
+    const uint64_t occupied = my_pieces | opp_pieces;
+    const uint64_t empty_squares = ~occupied;
 
     uint64_t pawns = pos.piece_bb[PAWN] & my_pieces;
     while (pawns) {
-        int from = lsb_index(pawns);
+        const int from = lsb_index(pawns);
         pawns &= pawns - 1;
-        int rank = from / 8;
-        int promotion_rank_idx = (stm == WHITE) ? 6 : 1; // Rank *before* promotion
+        const int rank = from / 8;
+        const int promotion_rank_idx = (stm == WHITE) ? 6 : 1; // Rank *before* promotion
 
         // Pawn pushes
-        int one_step_sq = (stm == WHITE) ? from + 8 : from - 8;
+        const int one_step_sq = (stm == WHITE) ? from + 8 : from - 8;
         if (one_step_sq >=0 && one_step_sq < 64 && get_bit(empty_squares, one_step_sq)) {
             if (rank == promotion_rank_idx) { // Reached promotion rank by one step
                 moves_list[move_count++] = {from, one_step_sq, QUEEN}; moves_list[move_count++] = {from, one_step_sq, ROOK};
@@ -440,9 +439,9 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
                 moves_list[move_count++] = {from, one_step_sq};
             // Double pawn push (only if single push is also possible and not captures_only)
             if (!captures_only) {
-                int start_rank_idx = (stm == WHITE) ? 1 : 6;
+                const int start_rank_idx = (stm == WHITE) ? 1 : 6;
                 if (rank == start_rank_idx) {
-                    int two_steps_sq = (stm == WHITE) ? from + 16 : from - 16;
+                    const int two_steps_sq = (stm == WHITE) ? from + 16 : from - 16;
                     if (two_steps_sq >=0 && two_steps_sq < 64 && get_bit(empty_squares, two_steps_sq))
                         moves_list[move_count++] = {from, two_steps_sq};
                 }
@@ -454,7 +453,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
              if (get_bit(pawn_attacks_bb[stm][from], pos.ep_square)) // Is the EP square a valid capture target?
                  pawn_cap_targets |= set_bit(pos.ep_square);
         while (pawn_cap_targets) {
-            int to = lsb_index(pawn_cap_targets);
+            const int to = lsb_index(pawn_cap_targets);
             pawn_cap_targets &= pawn_cap_targets - 1;
             if (rank == promotion_rank_idx) { // Reached promotion rank by capture
                 moves_list[move_count++] = {from, to, QUEEN}; moves_list[move_count++] = {from, to, ROOK};
@@ -464,11 +463,11 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
         }
     }
 
-    Piece piece_types_non_pawn[] = {KNIGHT, BISHOP, ROOK, QUEEN, KING};
-    for (Piece p_type : piece_types_non_pawn) {
+    const Piece piece_types_non_pawn[] = {KNIGHT, BISHOP, ROOK, QUEEN, KING};
+    for (const Piece p_type : piece_types_non_pawn) {
         uint64_t pieces_of_type = pos.piece_bb[p_type] & my_pieces;
         while (pieces_of_type) {
-            int from = lsb_index(pieces_of_type);
+            const int from = lsb_index(pieces_of_type);
             pieces_of_type &= pieces_of_type - 1;
 
             uint64_t attacks = 0;
@@ -481,7 +480,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
             attacks &= (captures_only ? opp_pieces : ~my_pieces); // Only captures or any non-friendly square
 
             while (attacks) {
-                int to = lsb_index(attacks);
+                const int to = lsb_index(attacks);
                 attacks &= attacks - 1;
                 moves_list[move_count++] = {from, to};
             }
@@ -490,7 +489,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
 
     // Castling
     if (!captures_only) {
-        int king_sq_idx = lsb_index(pos.piece_bb[KING] & my_pieces);
+        const int king_sq_idx = lsb_index(pos.piece_bb[KING] & my_pieces);
         if (king_sq_idx != -1) { // Should always be true in a valid position
             if (stm == WHITE) {
                 if ((pos.castling_rights & WK_CASTLE_MASK) && king_sq_idx == E1_SQ &&
@@ -520,13 +519,13 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
 Position make_move(const Position& pos, const Move& move, bool& legal_move_flag) {
     legal_move_flag = false;
     Position next_pos = pos;
-    int stm = pos.side_to_move;
-    int opp = 1 - stm;
+    const int stm = pos.side_to_move;
+    const int opp = 1 - stm;
 
-    uint64_t from_bb = set_bit(move.from);
-    uint64_t to_bb = set_bit(move.to);
-    Piece piece_moved = pos.piece_on_sq(move.from);
-    Piece piece_captured = pos.piece_on_sq(move.to); // Piece on 'to' square before move
+    const uint64_t from_bb = set_bit(move.from);
+    const uint64_t to_bb = set_bit(move.to);
+    const Piece piece_moved = pos.piece_on_sq(move.from);
+    const Piece piece_captured = pos.piece_on_sq(move.to); // Piece on 'to' square before move
 
     if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) return pos; // Moving no piece or opponent's piece
     if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) return pos; // Tried to capture own piece
@@ -554,7 +553,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     }
 
     if (piece_moved == PAWN && move.to == pos.ep_square && pos.ep_square != -1) {
-        int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
+        const int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
         next_pos.piece_bb[PAWN] &= ~set_bit(captured_pawn_sq);
         next_pos.color_bb[opp] &= ~set_bit(captured_pawn_sq);
         next_pos.zobrist_hash ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
@@ -569,7 +568,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     if (move.promotion != NO_PIECE) {
         if (piece_moved != PAWN) return pos; // Invalid promotion
-        int promotion_rank_actual = (stm == WHITE) ? 7 : 0; // Actual rank where pawn lands for promotion
+        const int promotion_rank_actual = (stm == WHITE) ? 7 : 0; // Actual rank where pawn lands for promotion
         if (move.to / 8 != promotion_rank_actual) return pos; // Invalid promotion square
         
         // The moving pawn doesn't get added back to the pawn key.
@@ -584,7 +583,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
     }
 
-    uint8_t old_castling_rights = pos.castling_rights; // Use pos's castling rights for comparison later
+    const uint8_t old_castling_rights = pos.castling_rights;
     uint8_t new_castling_rights = pos.castling_rights;
 
     if (piece_moved == KING) {
@@ -594,10 +593,10 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         // Handle castling move itself (rook movement)
         if (std::abs(move.to - move.from) == 2) { // King moved two squares
             int rook_from_sq, rook_to_sq;
-            if (move.to == E1_SQ + 2) { rook_from_sq = H1_SQ; rook_to_sq = E1_SQ + 1; } // White Kingside
-            else if (move.to == E1_SQ - 2) { rook_from_sq = A1_SQ; rook_to_sq = E1_SQ - 1; } // White Queenside
-            else if (move.to == E8_SQ + 2) { rook_from_sq = H8_SQ; rook_to_sq = E8_SQ + 1; } // Black Kingside
-            else { rook_from_sq = A8_SQ; rook_to_sq = E8_SQ - 1; } // Black Queenside (move.to == E8_SQ - 2)
+            if (move.to == G1_SQ)      { rook_from_sq = H1_SQ; rook_to_sq = E1_SQ + 1; } // White Kingside
+            else if (move.to == C1_SQ) { rook_from_sq = A1_SQ; rook_to_sq = E1_SQ - 1; } // White Queenside
+            else if (move.to == G8_SQ) { rook_from_sq = H8_SQ; rook_to_sq = E8_SQ + 1; } // Black Kingside
+            else                       { rook_from_sq = A8_SQ; rook_to_sq = E8_SQ - 1; } // Black Queenside
 
             next_pos.piece_bb[ROOK] &= ~set_bit(rook_from_sq);
             next_pos.piece_bb[ROOK] |= set_bit(rook_to_sq);
@@ -642,7 +641,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     if (stm == BLACK) next_pos.fullmove_number++;
     next_pos.ply = pos.ply + 1;
 
-    int king_sq_after_move = lsb_index(next_pos.piece_bb[KING] & next_pos.color_bb[stm]); // King of the side that just MOVED
+    const int king_sq_after_move = lsb_index(next_pos.piece_bb[KING] & next_pos.color_bb[stm]); // King of the side that just MOVED
     if (king_sq_after_move == -1) { /* Should not happen */ return pos; }
     if (is_square_attacked(next_pos, king_sq_after_move, opp)) // Check if own king is attacked by opponent
         return pos; // Illegal move, king left in check
@@ -800,7 +799,7 @@ void init_eval_masks() {
     for (int sq = 0; sq < 64; ++sq) {
         white_passed_pawn_block_mask[sq] = 0ULL;
         black_passed_pawn_block_mask[sq] = 0ULL;
-        int r = sq / 8, f = sq % 8;
+        const int r = sq / 8, f = sq % 8;
         for (int cur_r = r + 1; cur_r < 8; ++cur_r) { // Squares in front for White
             white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
             if (f > 0) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
@@ -820,12 +819,12 @@ bool is_insufficient_material(const Position& pos) {
     if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) return false;
 
     // Count minor pieces for both sides
-    int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
-    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
-    int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
-    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
-    int white_minors = white_knights + white_bishops;
-    int black_minors = black_knights + black_bishops;
+    const int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
+    const int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
+    const int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
+    const int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
+    const int white_minors = white_knights + white_bishops;
+    const int black_minors = black_knights + black_bishops;
 
     // Case: K vs K
     if (white_minors == 0 && black_minors == 0) return true;
@@ -848,22 +847,22 @@ bool is_insufficient_material(const Position& pos) {
 void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
                                        int& mg_pawn_score, int& eg_pawn_score,
                                        uint64_t& passed_pawns) {
-    uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
-    uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
+    const uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
+    const uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
     uint64_t temp_pawns = all_friendly_pawns;
     
     uint64_t enemy_pawn_attacks = 0;
     uint64_t temp_enemy_pawns = all_enemy_pawns;
     while(temp_enemy_pawns) {
-        int pawn_sq = lsb_index(temp_enemy_pawns);
+        const int pawn_sq = lsb_index(temp_enemy_pawns);
         enemy_pawn_attacks |= pawn_attacks_bb[1 - current_eval_color][pawn_sq];
         temp_enemy_pawns &= temp_enemy_pawns - 1;
     }
 
     while (temp_pawns) {
-        int sq = lsb_index(temp_pawns);
+        const int sq = lsb_index(temp_pawns);
         temp_pawns &= temp_pawns - 1;
-        int f = sq % 8;
+        const int f = sq % 8;
 
         // Isolated Pawn Evaluation
         if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
@@ -884,17 +883,17 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         }
         
         // Doubled Pawn Evaluation
-        uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
+        const uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
         if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
                 mg_pawn_score += doubled_pawn_liability_mg;
                 eg_pawn_score += doubled_pawn_liability_eg;
         }
         
         // Backward Pawn Evaluation
-        uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
-        uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
+        const uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
+        const uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
         if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
-            int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
+            const int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
             if (get_bit(enemy_pawn_attacks, push_sq)) {
                 mg_pawn_score += hindered_pawn_penalty_mg;
                 eg_pawn_score += hindered_pawn_penalty_eg;
@@ -910,7 +909,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         }
         if (is_passed) {
             passed_pawns |= set_bit(sq);
-            int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
+            const int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
             mg_pawn_score += passed_pawn_bonus_mg[rank_from_own_side];
             eg_pawn_score += passed_pawn_bonus_eg[rank_from_own_side];
         }
@@ -961,23 +960,23 @@ int evaluate(Position& pos) {
     uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
 
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
-        Color current_eval_color = (Color)c_idx;
-        Color enemy_color = (Color)(1-c_idx);
-        int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
+        const Color current_eval_color = (Color)c_idx;
+        const Color enemy_color = (Color)(1-c_idx);
+        const int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
         
         // Helper bitboards for mobility and pawn structure
-        uint64_t friendly_pieces = pos.color_bb[current_eval_color];
-        uint64_t enemy_pieces = pos.color_bb[enemy_color];
-        uint64_t attackable_squares = ~friendly_pieces;
-        uint64_t occupied = pos.get_occupied_bb();
-        uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
-        uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
+        const uint64_t friendly_pieces = pos.color_bb[current_eval_color];
+        const uint64_t enemy_pieces = pos.color_bb[enemy_color];
+        const uint64_t attackable_squares = ~friendly_pieces;
+        const uint64_t occupied = pos.get_occupied_bb();
+        const uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
+        const uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
         
         // Pre-calculate enemy pawn attacks once per color evaluation.
         uint64_t enemy_pawn_attacks = 0;
         uint64_t temp_enemy_pawns_for_attack_map = all_enemy_pawns;
         while(temp_enemy_pawns_for_attack_map) {
-            int pawn_sq = lsb_index(temp_enemy_pawns_for_attack_map);
+            const int pawn_sq = lsb_index(temp_enemy_pawns_for_attack_map);
             enemy_pawn_attacks |= pawn_attacks_bb[enemy_color][pawn_sq];
             temp_enemy_pawns_for_attack_map &= temp_enemy_pawns_for_attack_map - 1;
         }
@@ -987,30 +986,30 @@ int evaluate(Position& pos) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
             game_phase += pop_count(b) * game_phase_inc[p];
             while (b) {
-                int sq = lsb_index(b);
+                const int sq = lsb_index(b);
                 b &= b - 1;
-                int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
+                const int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
 
                 mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
                 eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
 
                 if ((Piece)p == PAWN) {
-                    uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
+                    const uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
                     if (get_bit(current_passed_pawns, sq)) {
                         // Passed Pawn distance to enemy king
-                        int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
+                        const int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
                         if (enemy_king_sq != -1) {
-                            int pawn_rank = sq / 8; int pawn_file = sq % 8;
-                            int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
-                            int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), std::abs(pawn_file - king_file));
+                            const int pawn_rank = sq / 8, pawn_file = sq % 8;
+                            const int king_rank = enemy_king_sq / 8, king_file = enemy_king_sq % 8;
+                            const int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), std::abs(pawn_file - king_file));
                             // Bonus increases the further the king is, making it harder to stop the pawn
                             eg_score += side_multiplier * dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
                         }
                     }
                 } else if ((Piece)p == ROOK) {
-                    int f = sq % 8;
-                    bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
-                    bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
+                    const int f = sq % 8;
+                    const bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
+                    const bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
                         if (!enemy_pawn_on_file) { // Open file
                             mg_score += side_multiplier * ROOK_ON_OPEN_FILE_MG; 
@@ -1022,21 +1021,21 @@ int evaluate(Position& pos) {
                     }
                     
                     // --- Rook on Attack Rank Bonus ---
-                    int attack_rank = (current_eval_color == WHITE) ? 6 : 1;
+                    const int attack_rank = (current_eval_color == WHITE) ? 6 : 1;
                     if (sq / 8 == attack_rank) {
                         mg_score += side_multiplier * ROOK_ATTACK_RANK_MG;
                         eg_score += side_multiplier * ROOK_ATTACK_RANK_EG;
 
-                        int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
+                        const int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
                         if (enemy_king_sq != -1) {
-                            int enemy_back_rank = (enemy_color == WHITE) ? 0 : 7;
+                            const int enemy_back_rank = (enemy_color == WHITE) ? 0 : 7;
                             if (enemy_king_sq / 8 == enemy_back_rank) {
                                 mg_score += side_multiplier * ATTACK_RANK_KING_TRAP_MG;
                                 eg_score += side_multiplier * ATTACK_RANK_KING_TRAP_EG;
                             }
                         }
                         
-                        uint64_t friendly_heavies = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & friendly_pieces;
+                        const uint64_t friendly_heavies = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & friendly_pieces;
                         if (get_rook_attacks(sq, occupied) & friendly_heavies & ~set_bit(sq)) {
                             mg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_MG;
                             eg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_EG;
@@ -1044,23 +1043,23 @@ int evaluate(Position& pos) {
                     }
 
                     // Rook Mobility
-                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
+                    const uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    const int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_eg;
                 }
                 // Mobility and other piece features
                 else if ((Piece)p == KNIGHT) {
-                    uint64_t mobility_attacks = knight_attacks_bb[sq];
+                    const uint64_t mobility_attacks = knight_attacks_bb[sq];
                     piece_attacks_bb[c_idx][KNIGHT] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    const int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
 
                     // Knight Outpost Bonus
-                    int rank = sq / 8;
-                    int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
+                    const int rank = sq / 8;
+                    const int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
                         if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
                              if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
@@ -1072,10 +1071,10 @@ int evaluate(Position& pos) {
                     // Potential Outpost
                     uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
                     while(potential_outpost_moves) {
-                        int to_sq = lsb_index(potential_outpost_moves);
+                        const int to_sq = lsb_index(potential_outpost_moves);
                         potential_outpost_moves &= potential_outpost_moves-1;
-                        int to_rank = to_sq/8;
-                        int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
+                        const int to_rank = to_sq/8;
+                        const int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
                         if (to_relative_rank >= 3 && to_relative_rank <=5) {
                             if (get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
                                 mg_score += side_multiplier * potential_dominance_bonus;
@@ -1084,15 +1083,15 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == BISHOP) {
-                    uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
+                    const uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    const int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
 
                     // Bishop Outpost Bonus
-                    int rank = sq / 8;
-                    int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
+                    const int rank = sq / 8;
+                    const int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
                      if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
                         if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
                              if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
@@ -1102,9 +1101,9 @@ int evaluate(Position& pos) {
                         }
                     }
                 } else if ((Piece)p == QUEEN) {
-                    uint64_t mobility_attacks = get_queen_attacks(sq, occupied);
+                    const uint64_t mobility_attacks = get_queen_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    const int mobility_count = pop_count(mobility_attacks & attackable_squares);
                     mg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_mg;
                     eg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_eg;
                 } else if ((Piece)p == KING) {
@@ -1118,11 +1117,11 @@ int evaluate(Position& pos) {
         }
 
         // --- Tactical Pressure & Threats ---
-        uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
-        uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
+        const uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
+        const uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
 
         // Minor pieces attacking heavy pieces
-        uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
+        const uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
         if (pop_count(minor_attacks & enemy_rooks_and_queens) > 0) {
             mg_score += side_multiplier * minor_on_heavy_pressure_mg * pop_count(minor_attacks & enemy_rooks_and_queens);
             eg_score += side_multiplier * minor_on_heavy_pressure_eg * pop_count(minor_attacks & enemy_rooks_and_queens);
@@ -1135,28 +1134,28 @@ int evaluate(Position& pos) {
         }
 
         // --- King Safety and Shelter Evaluation ---
-        int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
+        const int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
         if (king_sq != -1) {
             // PART 1: King Shelter (Pawn Shield)
             int shelter_score = 0;
-            int king_file = king_sq % 8;
-            int king_rank = king_sq / 8;
-            int shield_f_start = std::max(0, king_file - 1);
-            int shield_f_end = std::min(7, king_file + 1);
-            int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
-            int shield_rank_2 = (current_eval_color == WHITE) ? king_rank + 2 : king_rank - 2;
+            const int king_file = king_sq % 8;
+            const int king_rank = king_sq / 8;
+            const int shield_f_start = std::max(0, king_file - 1);
+            const int shield_f_end = std::min(7, king_file + 1);
+            const int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
+            const int shield_rank_2 = (current_eval_color == WHITE) ? king_rank + 2 : king_rank - 2;
 
             if (shield_rank_1 >= 0 && shield_rank_1 < 8) {
                 for (int f = shield_f_start; f <= shield_f_end; ++f) {
-                    uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
+                    const uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
 
                     if (!friendly_pawns_on_file) {
                         shelter_score += SHIELD_PAWN_MISSING_PENALTY;
                         if (!(file_bb_mask[f] & all_enemy_pawns))
                             shelter_score += SHIELD_OPEN_FILE_PENALTY;
                     } else {
-                        bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
-                        bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
+                        const bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
+                        const bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
 
                         if (pawn_on_shield_rank_1)
                             shelter_score += SHIELD_PAWN_PRESENT_BONUS;
@@ -1168,7 +1167,7 @@ int evaluate(Position& pos) {
                 }
             }
 
-            int home_rank = (current_eval_color == WHITE) ? 0 : 7;
+            const int home_rank = (current_eval_color == WHITE) ? 0 : 7;
             if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
                 mg_score += side_multiplier * shelter_score;
 
@@ -1177,30 +1176,30 @@ int evaluate(Position& pos) {
             
             uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_pieces;
             while (enemy_knights) {
-                int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                const int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
+                const int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += knight_tropism_bonus[dist];
             }
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_pieces;
             while (enemy_bishops) {
-                int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                const int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
+                const int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += bishop_tropism_bonus[dist];
             }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_pieces;
             while (enemy_rooks) {
-                int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                const int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
+                const int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += rook_tropism_bonus[dist];
             }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_pieces;
             while (enemy_queens) {
-                int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
+                const int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
+                const int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
                 attack_proximity_score += queen_tropism_bonus[dist];
             }
 
-            int danger_idx = std::min(attack_proximity_score / 10, 30); // Scale and cap index
+            const int danger_idx = std::min(attack_proximity_score / 10, 30); // Scale and cap index
             mg_score -= side_multiplier * king_threat_penalty_mg[danger_idx];
             eg_score -= side_multiplier * king_threat_penalty_eg[danger_idx];
         }
@@ -1222,7 +1221,7 @@ int evaluate(Position& pos) {
     game_phase = std::min(game_phase, 24);
     game_phase = std::max(game_phase, 0);
 
-    int final_score_from_white_pov = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
+    const int final_score_from_white_pov = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
     pos.static_eval = (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
     return pos.static_eval;
 }
@@ -1247,7 +1246,7 @@ void init_tt(size_t mb_size) {
         transposition_table.clear(); tt_mask = 0; return;
     }
 
-    size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
+    const size_t num_entries = (mb_size * 1024 * 1024) / sizeof(TTEntry);
     if (num_entries == 0) {
         transposition_table.clear(); tt_mask = 0; return;
     }
@@ -1275,7 +1274,7 @@ void clear_tt() {
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
     if (tt_mask == 0 || !g_tt_is_initialized) return false;
-    TTEntry& entry = transposition_table[hash & tt_mask];
+    const TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (entry.hash == hash && entry.bound != TT_NONE) {
         move_from_tt = entry.best_move;
@@ -1300,10 +1299,10 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
     if (score > MATE_THRESHOLD) score += ply;
     else if (score < -MATE_THRESHOLD) score -= ply;
 
-    bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
-                          (depth > entry.depth) ||
-                          (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
-                          (depth == entry.depth && entry.bound == TT_NONE);
+    const bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
+                                (depth > entry.depth) ||
+                                (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
+                                (depth == entry.depth && entry.bound == TT_NONE);
 
     if (should_replace) {
         entry.hash = hash;
@@ -1353,7 +1352,7 @@ void reset_search_heuristics() {
     for (int d = 1; d < MAX_PLY; ++d) {
         for (int m = 1; m < 256; ++m) {
             // Formula: log(depth) * log(moves_searched) / C
-            double reduction = (log(d) * log(m)) / 2.3;
+            const double reduction = (log(d) * log(m)) / 2.3;
             
             int r = static_cast<int>(reduction);
 
@@ -1390,7 +1389,7 @@ int see(const Position& pos, const Move& move) {
     uint64_t occupied = pos.get_occupied_bb();
 
     Color stm = pos.color_on_sq(move.from);
-    Piece captured_piece_type = pos.piece_on_sq(move.to);
+    const Piece captured_piece_type = pos.piece_on_sq(move.to);
     if(move.promotion != NO_PIECE)
         gain[d] = see_piece_values[move.promotion];
     else
@@ -1462,10 +1461,10 @@ public:
 private:
     void score_all_moves();
     const Position& m_pos;
-    int m_ply;
-    Move m_tt_move;
-    Move m_prev_move;
-    bool m_quiescence_mode;
+    const int m_ply;
+    const Move m_tt_move;
+    const Move m_prev_move;
+    const bool m_quiescence_mode;
 
     Move m_moves[256];
     int m_move_count;
@@ -1473,8 +1472,8 @@ private:
 };
 
 void MovePicker::score_all_moves() {
-    Move refutation = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
-    uint64_t opp_pieces = m_pos.color_bb[1-m_pos.side_to_move];
+    const Move refutation = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
+    const uint64_t opp_pieces = m_pos.color_bb[1-m_pos.side_to_move];
 
     for (int i = 0; i < m_move_count; ++i) {
         Move& m = m_moves[i];
@@ -1484,11 +1483,11 @@ void MovePicker::score_all_moves() {
             continue;
         }
 
-        bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
+        const bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
         
         if (is_capture || m.promotion != NO_PIECE) {
              if (see(m_pos, m) >= 0) {
-                Piece moved = m_pos.piece_on_sq(m.from);
+                const Piece moved = m_pos.piece_on_sq(m.from);
                 Piece captured = m_pos.piece_on_sq(m.to);
                 if (captured == NO_PIECE) captured = PAWN; // En-passant case
                 m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
@@ -1525,7 +1524,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     nodes_searched++;
     if (check_time() || ply >= MAX_PLY - 1) return evaluate(pos);
 
-    bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
+    const bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     int stand_pat_score;
 
     if (in_check)
@@ -1550,7 +1549,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (!legal) continue;
         legal_moves_in_qsearch++;
 
-        int score = -quiescence_search(next_pos, -beta, -alpha, ply + 1);
+        const int score = -quiescence_search(next_pos, -beta, -alpha, ply + 1);
 
         if (score >= beta) return beta; // Fail-high
         if (score > alpha) alpha = score;
@@ -1579,29 +1578,29 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     if (depth <= 0) return quiescence_search(pos, alpha, beta, ply);
 
-    int original_alpha = alpha;
+    const int original_alpha = alpha;
     Move tt_move = NULL_MOVE;
     int tt_score;
     if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score))
         return tt_score;
 
-    int static_eval = evaluate(pos);
+    const int static_eval = evaluate(pos);
     search_path_evals[ply] = static_eval;
 
     // --- Modern Pruning Techniques ---
     if (!is_pv_node && !in_check) {
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
-            int futility_margin = 90 + 60 * depth;
+            const int futility_margin = 90 + 60 * depth;
             if (static_eval - futility_margin >= beta)
                 return beta; 
         }
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 250 + 80 * (depth-1);
+            const int razoring_margin = 250 + 80 * (depth-1);
             if (static_eval + razoring_margin < alpha) {
-                int q_score = quiescence_search(pos, alpha, beta, ply);
+                const int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
                     return alpha;
             }
@@ -1621,7 +1620,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.zobrist_hash ^= zobrist_side_to_move;
             null_next_pos.ply = pos.ply + 1;
 
-            int R_nmp = (depth > 6) ? 3 : 2;
+            const int R_nmp = (depth > 6) ? 3 : 2;
             int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
@@ -1668,7 +1667,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition)
             score = 0;
         else {
-            bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
+            const bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
 
             if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
@@ -1719,7 +1718,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                             refutation_moves[prev_move.from][prev_move.to] = current_move;
 
                         // History Heuristic Update
-                        int bonus = depth * depth;
+                        const int bonus = depth * depth;
                         int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
@@ -1740,7 +1739,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (legal_moves_played == 0)
         return in_check ? (-MATE_SCORE + ply) : 0;
 
-    TTBound final_bound_type = (best_score > original_alpha) ? TT_EXACT : TT_UPPER;
+    const TTBound final_bound_type = (best_score > original_alpha) ? TT_EXACT : TT_UPPER;
     store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
     return best_score;
 }
@@ -1755,7 +1754,7 @@ uint64_t calculate_pawn_zobrist_hash(const Position& pos) {
     for (int c = 0; c < 2; ++c) {
         uint64_t b = pos.piece_bb[PAWN] & pos.color_bb[c];
         while (b) {
-            int sq = lsb_index(b);
+            const int sq = lsb_index(b);
             b &= b - 1;
             h ^= zobrist_pieces[c][PAWN][sq];
         }
@@ -1771,7 +1770,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
     // 1. Piece placement
     ss >> part;
     int rank = 7, file = 0;
-    for (char c : part) {
+    for (const char c : part) {
         if (std::isdigit(c)) {
             file += (c - '0');
         } else if (c == '/') {
@@ -1779,13 +1778,13 @@ void parse_fen(Position& pos, const std::string& fen_str) {
         } else {
             Piece p_type = NO_PIECE; Color p_color = NO_COLOR;
             if (std::islower(c)) p_color = BLACK; else p_color = WHITE;
-            char lower_c = std::tolower(c);
+            const char lower_c = std::tolower(c);
             if (lower_c == 'p') p_type = PAWN; else if (lower_c == 'n') p_type = KNIGHT;
             else if (lower_c == 'b') p_type = BISHOP; else if (lower_c == 'r') p_type = ROOK;
             else if (lower_c == 'q') p_type = QUEEN; else if (lower_c == 'k') p_type = KING;
 
             if (p_type != NO_PIECE && rank >=0 && rank < 8 && file >=0 && file < 8) {
-                int sq = rank * 8 + file;
+                const int sq = rank * 8 + file;
                 pos.piece_bb[p_type] |= set_bit(sq);
                 pos.color_bb[p_color] |= set_bit(sq);
             }
@@ -1798,7 +1797,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
 
     // 3. Castling rights
     ss >> part; pos.castling_rights = 0;
-    for (char c : part) {
+    for (const char c : part) {
         if (c == 'K') pos.castling_rights |= WK_CASTLE_MASK;
         else if (c == 'Q') pos.castling_rights |= WQ_CASTLE_MASK;
         else if (c == 'k') pos.castling_rights |= BK_CASTLE_MASK;
@@ -1809,8 +1808,8 @@ void parse_fen(Position& pos, const std::string& fen_str) {
     ss >> part;
     if (part != "-") {
         if (part.length() == 2 && part[0] >= 'a' && part[0] <= 'h' && part[1] >= '1' && part[1] <= '8') {
-            int ep_file = part[0] - 'a';
-            int ep_rank = part[1] - '1';
+            const int ep_file = part[0] - 'a';
+            const int ep_rank = part[1] - '1';
             pos.ep_square = ep_rank * 8 + ep_file;
         } else pos.ep_square = -1;
     } else pos.ep_square = -1;
@@ -1841,7 +1840,7 @@ Move parse_uci_move_from_string(const Position& current_pos, const std::string& 
     if (m.from < 0 || m.from > 63 || m.to < 0 || m.to > 63) return NULL_MOVE; // Invalid square
 
     if (uci_move_str.length() == 5) {
-        char promo_char = uci_move_str[4];
+        const char promo_char = uci_move_str[4];
         if (promo_char == 'q') m.promotion = QUEEN;
         else if (promo_char == 'n') m.promotion = KNIGHT;
         else if (promo_char == 'b') m.promotion = BISHOP;
@@ -1857,7 +1856,7 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[c];
             while (b) {
-                int sq = lsb_index(b);
+                const int sq = lsb_index(b);
                 b &= b - 1;
                 h ^= zobrist_pieces[c][p][sq];
             }
@@ -1878,7 +1877,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.44\n";
+            std::cout << "id name Amira 1.45\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1898,7 +1897,7 @@ void uci_loop() {
 
                 if (name_str == "Hash") {
                     try {
-                        int parsed_size = std::stoi(value_str_val);
+                        const int parsed_size = std::stoi(value_str_val);
                         g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 1024));
                     } catch (...) { /* ignore parse error, keep default */ }
                     init_tt(g_configured_tt_size_mb);
@@ -1947,14 +1946,14 @@ void uci_loop() {
             if (token == "moves") {
                 std::string move_str_uci;
                 while (ss >> move_str_uci) {
-                    Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
+                    const Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
                     if (m.is_null() && move_str_uci != "0000") break;
                     if (m.is_null() && move_str_uci == "0000") break;
 
                     if (game_history_length < 256)
                         game_history_hashes[game_history_length++] = uci_root_pos.zobrist_hash;
-                    Piece moved_piece = uci_root_pos.piece_on_sq(m.from);
-                    Piece captured_piece = uci_root_pos.piece_on_sq(m.to);
+                    const Piece moved_piece = uci_root_pos.piece_on_sq(m.from);
+                    const Piece captured_piece = uci_root_pos.piece_on_sq(m.to);
                     if (moved_piece == PAWN || captured_piece != NO_PIECE)
                         game_history_length = 0;
 
@@ -1971,7 +1970,7 @@ void uci_loop() {
             }
 
             Move root_pseudo_moves[256];
-            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
+            const int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
             for (int i = 0; i < num_pseudo_moves; ++i) {
                 const Move& m = root_pseudo_moves[i];
@@ -2008,41 +2007,26 @@ void uci_loop() {
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
 
-            long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
-            long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
+            const long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
+            const long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
 
             if (my_time != -1) {
                 use_time_limits = true;
 
                 if (my_inc > 0) {
                     // --- INCREMENT TIME CONTROL ---
-                    // Per user request, this original logic is preserved for increment controls.
-                    double soft_limit_s = my_time * 0.000052;
-                    double hard_limit_s = my_time * 0.00041;
+                    const double soft_limit_s = my_time * 0.000052;
+                    const double hard_limit_s = my_time * 0.00041;
                     soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
                     hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
                 } else {
                     // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
-                    int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
+                    const int divisor = (movestogo > 0) ? movestogo : 25;
                     long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
                     allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
                     if (allocated_time_ms >= my_time)
-                        allocated_time_ms = my_time - 100; // Leave 100ms
+                        allocated_time_ms = my_time - 100;
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                 }
@@ -2089,20 +2073,19 @@ void uci_loop() {
                      best_score_overall = current_score;
                 } else {
                      best_score_overall = current_score;
-                     TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
+                     const TTEntry root_entry_check = transposition_table[uci_root_pos.zobrist_hash & tt_mask];
                      if (root_entry_check.hash == uci_root_pos.zobrist_hash && !root_entry_check.best_move.is_null())
                          uci_best_move_overall = root_entry_check.best_move;
                 }
 
-                auto now_tp = std::chrono::steady_clock::now();
-                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
+                const auto now_tp = std::chrono::steady_clock::now();
+                long long elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_tp - search_start_timepoint).count();
                 if (elapsed_ms <= 0) elapsed_ms = 1;
 
                 std::cout << "info depth " << depth << " score cp " << best_score_overall;
                 if (best_score_overall > MATE_THRESHOLD) std::cout << " mate " << (MATE_SCORE - best_score_overall + 1)/2 ;
                 else if (best_score_overall < -MATE_THRESHOLD) std::cout << " mate " << -(MATE_SCORE + best_score_overall +1)/2;
-                std::cout << " nodes " << nodes_searched << " time " << elapsed_ms;
-                if (elapsed_ms > 0 && nodes_searched > 0) std::cout << " nps " << (nodes_searched * 1000 / elapsed_ms);
+                std::cout << " nodes " << nodes_searched << " time " << elapsed_ms << " nps " << (nodes_searched * 1000 / elapsed_ms);
 
                 if (!uci_best_move_overall.is_null()) {
                     std::cout << " pv";
