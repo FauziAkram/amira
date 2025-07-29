@@ -9,6 +9,7 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::log
+#include <functional> // For std::partition
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -20,7 +21,7 @@ enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
-constexpr int TT_SIZE_MB_DEFAULT = 256;
+constexpr int TT_SIZE_MB_DEFAULT = 512;
 constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
@@ -47,6 +48,7 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 uint64_t calculate_pawn_zobrist_hash(const Position& pos);
+int see(const Position& pos, const Move& move);
 
 // --- Pawn Cache ---
 struct PawnCacheEntry {
@@ -168,12 +170,14 @@ struct Position {
     int halfmove_clock;
     int fullmove_number;
     int ply;
+    int static_eval; // Store the last evaluation for dynamic LMR
 
     Position() {
         std::memset(this, 0, sizeof(Position)); // Efficiently zero out
         side_to_move = WHITE;
         ep_square = -1;
         fullmove_number = 1;
+        static_eval = 0;
     }
 
     uint64_t get_occupied_bb() const { return color_bb[WHITE] | color_bb[BLACK]; }
@@ -398,6 +402,19 @@ bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
 
     return false;
 }
+
+uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occupied) {
+    uint64_t attackers = 0;
+    // Note: This gets attackers from BOTH sides. The calling function must filter by color.
+    attackers |= pawn_attacks_bb[WHITE][sq_to_check] & pos.piece_bb[PAWN] & pos.color_bb[BLACK];
+    attackers |= pawn_attacks_bb[BLACK][sq_to_check] & pos.piece_bb[PAWN] & pos.color_bb[WHITE];
+    attackers |= knight_attacks_bb[sq_to_check] & pos.piece_bb[KNIGHT];
+    attackers |= king_attacks_bb[sq_to_check] & pos.piece_bb[KING];
+    attackers |= get_bishop_attacks(sq_to_check, occupied) & (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]);
+    attackers |= get_rook_attacks(sq_to_check, occupied) & (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]);
+    return attackers;
+}
+
 
 // --- Move Generation (updated with magic bitboards) --- //
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
@@ -654,6 +671,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 // --- Evaluation ---
 const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
 const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
+const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // For SEE
 
 // Piece Square Tables (values are for white, mirrored for black)
 const int pawn_pst[64] = {
@@ -1225,7 +1243,8 @@ int evaluate(Position& pos) {
     game_phase = std::max(game_phase, 0);
 
     int final_score_from_white_pov = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
-    return (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
+    pos.static_eval = (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
+    return pos.static_eval;
 }
 
 // --- Transposition Table ---
@@ -1340,6 +1359,7 @@ constexpr int MAX_HISTORY_SCORE = 24000;
 uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
 int game_history_length = 0;
 uint64_t search_path_hashes[MAX_PLY]; // Stores hashes of positions in the current search path
+int search_path_evals[MAX_PLY]; // Stores static evals for dynamic LMR
 
 void reset_search_state() {
     nodes_searched = 0;
@@ -1385,40 +1405,153 @@ bool check_time() {
     return false;
 }
 
-const int mvv_lva_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // P,N,B,R,Q,K,NO_PIECE
+// --- Static Exchange Evaluation (SEE) ---
+int see(const Position& pos, const Move& move) {
+    int gain[32];
+    int d = 0;
+    uint64_t from_bb = set_bit(move.from);
+    uint64_t to_bb = set_bit(move.to);
+    uint64_t occupied = pos.get_occupied_bb();
 
-void score_moves(const Position& pos, Move* moves, int num_moves, const Move& tt_move, int ply, const Move& prev_move) {
-    Move refutation = (ply > 0 && !prev_move.is_null()) ? refutation_moves[prev_move.from][prev_move.to] : NULL_MOVE;
+    Color stm = pos.color_on_sq(move.from);
+    Piece captured_piece_type = pos.piece_on_sq(move.to);
+    if(move.promotion != NO_PIECE) {
+        gain[d] = see_piece_values[move.promotion];
+    } else {
+        gain[d] = see_piece_values[captured_piece_type];
+    }
+    
+    Piece attacking_piece_type = pos.piece_on_sq(move.from);
 
-    for (int i = 0; i < num_moves; ++i) {
-        Move& m = moves[i];
-        if (!tt_move.is_null() && m == tt_move) {
-            m.score = 2000000; // TT move gets highest priority
+    // Initial capture
+    uint64_t attackers = get_attackers_to_sq(pos, move.to, occupied);
+    occupied ^= from_bb;
+    stm = (Color)(1-stm);
+    d++;
+
+    while (true) {
+        gain[d] = see_piece_values[attacking_piece_type] - gain[d - 1];
+        if (std::max(-gain[d-1], gain[d]) < 0) break; // if both sides are losing, stop
+        
+        uint64_t side_attackers = attackers & pos.color_bb[stm];
+        if (!side_attackers) break;
+        
+        from_bb = 0;
+        attacking_piece_type = NO_PIECE;
+
+        // Find least valuable attacker
+        for (int p_type = PAWN; p_type <= KING; ++p_type) {
+            uint64_t p_attackers = side_attackers & pos.piece_bb[p_type];
+            if (p_attackers) {
+                from_bb = set_bit(lsb_index(p_attackers));
+                attacking_piece_type = (Piece)p_type;
+                break;
+            }
+        }
+
+        if(from_bb == 0) break; // Should not happen if side_attackers is not 0
+
+        attackers ^= from_bb;
+        occupied ^= from_bb;
+        stm = (Color)(1 - stm);
+        d++;
+    }
+
+    while (--d) {
+        gain[d-1] = -std::max(-gain[d-1], gain[d]);
+    }
+    return gain[0];
+}
+
+// --- Move Picker (Phased Move Generation) ---
+class MovePicker {
+public:
+    MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence = false)
+        : m_pos(pos), m_ply(ply), m_tt_move(tt_move), m_prev_move(prev_move), m_quiescence_mode(quiescence) {
+        
+        m_current_idx = 0;
+        if(m_quiescence_mode) {
+             m_move_count = generate_moves(m_pos, m_moves, true);
+             for(int i=0; i<m_move_count; ++i) {
+                Piece captured = m_pos.piece_on_sq(m_moves[i].to);
+                if (captured == NO_PIECE) captured = PAWN;
+                m_moves[i].score = (see_piece_values[captured] * 100) - m_pos.piece_on_sq(m_moves[i].from);
+             }
         } else {
-            Piece moved_piece = pos.piece_on_sq(m.from);
-            Piece captured_piece = pos.piece_on_sq(m.to);
+            m_move_count = generate_moves(m_pos, m_moves, false);
+            score_all_moves();
+        }
+    }
 
-            if (captured_piece != NO_PIECE) {
-                // MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-                m.score = 1000000 + (mvv_lva_piece_values[captured_piece] * 100) - mvv_lva_piece_values[moved_piece];
-            } else if (m.promotion != NO_PIECE) {
-                 m.score = 900000 + mvv_lva_piece_values[m.promotion];
-            } else if (!refutation.is_null() && m == refutation) {
-                m.score = 850000; // Refutation move
-            } else if (ply < MAX_PLY && !killer_moves[ply][0].is_null() && m == killer_moves[ply][0]) {
-                m.score = 800000; // First killer move
-            } else if (ply < MAX_PLY && !killer_moves[ply][1].is_null() && m == killer_moves[ply][1]) {
-                m.score = 700000; // Second killer move
+    Move next_move();
+
+private:
+    void score_all_moves();
+    const Position& m_pos;
+    int m_ply;
+    Move m_tt_move;
+    Move m_prev_move;
+    bool m_quiescence_mode;
+
+    Move m_moves[256];
+    int m_move_count;
+    int m_current_idx;
+};
+
+void MovePicker::score_all_moves() {
+    Move refutation = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
+    uint64_t opp_pieces = m_pos.color_bb[1-m_pos.side_to_move];
+
+    for (int i = 0; i < m_move_count; ++i) {
+        Move& m = m_moves[i];
+        
+        if (m == m_tt_move) {
+            m.score = 3000000;
+            continue;
+        }
+
+        bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
+        
+        if (is_capture || m.promotion != NO_PIECE) {
+             if (see(m_pos, m) >= 0) {
+                Piece moved = m_pos.piece_on_sq(m.from);
+                Piece captured = m_pos.piece_on_sq(m.to);
+                if (captured == NO_PIECE) captured = PAWN; // En-passant case
+                m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
+             } else {
+                 m.score = -1000000; // Bad capture
+             }
+        } else { // Quiet moves
+            if (!refutation.is_null() && m == refutation) {
+                m.score = 1000000;
+            } else if (m_ply < MAX_PLY && !killer_moves[m_ply][0].is_null() && m == killer_moves[m_ply][0]) {
+                m.score = 900000;
+            } else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1]) {
+                m.score = 800000;
             } else {
-                // History heuristic for quiet moves
-                m.score = move_history_score[pos.side_to_move][m.from][m.to];
+                m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
             }
         }
     }
-    // Sort moves by score in descending order
-    std::sort(moves, moves + num_moves, [](const Move& a, const Move& b){ return a.score > b.score; });
 }
 
+Move MovePicker::next_move() {
+    if (m_current_idx >= m_move_count) {
+        return NULL_MOVE;
+    }
+
+    int best_idx = m_current_idx;
+    for (int i = m_current_idx + 1; i < m_move_count; ++i) {
+        if (m_moves[i].score > m_moves[best_idx].score) {
+            best_idx = i;
+        }
+    }
+
+    std::swap(m_moves[m_current_idx], m_moves[best_idx]);
+    return m_moves[m_current_idx++];
+}
+
+// --- Quiescence Search ---
 int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     nodes_searched++;
     if (check_time() || ply >= MAX_PLY - 1) return evaluate(pos);
@@ -1433,17 +1566,18 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (stand_pat_score >= beta) return beta; // Fail-high
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
-
-    Move q_moves[256];
-    int num_q_moves = generate_moves(pos, q_moves, !in_check);
-
-    score_moves(pos, q_moves, num_q_moves, NULL_MOVE, ply, NULL_MOVE);
-
+    
+    MovePicker picker(pos, ply, NULL_MOVE, NULL_MOVE, true);
+    Move current_move;
     int legal_moves_in_qsearch = 0;
-    for (int i = 0; i < num_q_moves; ++i) {
-        const Move& cap_move = q_moves[i];
+
+    while (!(current_move = picker.next_move()).is_null()) {
+        if (!in_check) {
+            if (see(pos, current_move) < 0) continue;
+        }
+
         bool legal;
-        Position next_pos = make_move(pos, cap_move, legal);
+        Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
         legal_moves_in_qsearch++;
 
@@ -1484,10 +1618,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         return tt_score;
     }
 
+    int static_eval = evaluate(pos);
+    search_path_evals[ply] = static_eval;
+
     // --- Modern Pruning Techniques ---
     if (!is_pv_node && !in_check) {
-        int static_eval = evaluate(pos);
-
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
             int futility_margin = 90 + 60 * depth;
@@ -1511,7 +1646,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     // Null Move Pruning (NMP)
     if (!is_pv_node && !in_check && can_null_move && depth >= 3 && ply > 0 &&
         (pos.color_bb[pos.side_to_move] & ~(pos.piece_bb[PAWN] | pos.piece_bb[KING])) != 0 &&
-        evaluate(pos) >= beta) {
+        static_eval >= beta) {
             Position null_next_pos = pos;
             null_next_pos.side_to_move = 1 - pos.side_to_move;
             null_next_pos.zobrist_hash = pos.zobrist_hash;
@@ -1532,16 +1667,16 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-    Move moves[256];
-    int num_moves = generate_moves(pos, moves, false);
-    score_moves(pos, moves, num_moves, tt_move, ply, prev_move);
-
+    MovePicker picker(pos, ply, tt_move, prev_move);
+    Move current_move;
+    
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    for (int i = 0; i < num_moves; ++i) {
-        const Move& current_move = moves[i];
+    std::vector<Move> quiet_moves_for_history;
+
+    while(!(current_move = picker.next_move()).is_null()) {
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
@@ -1568,17 +1703,31 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition) {
             score = 0;
         } else {
+            bool is_capture = (pos.piece_on_sq(current_move.to) != NO_PIECE || current_move.promotion != NO_PIECE);
+            bool is_quiet = !is_capture;
+
+            if (is_quiet) {
+                quiet_moves_for_history.push_back(current_move);
+            }
+
             if (legal_moves_played == 1) { // PVS: First move gets full window search
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
             } else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
-                if (depth >= 3 && depth < MAX_PLY && i >= 1 && !in_check && current_move.promotion == NO_PIECE &&
-                    pos.piece_on_sq(current_move.to) == NO_PIECE) {
-                    R_lmr = search_reductions[depth][i];
+                if (depth >= 3 && depth < MAX_PLY && legal_moves_played > 1 && is_quiet) {
+                    bool improving = false;
+                    if (ply >= 2 && !in_check) {
+                        improving = static_eval > search_path_evals[ply-2];
+                    }
+                    R_lmr = search_reductions[depth][legal_moves_played];
+                    if (!improving) R_lmr++; // More reduction if not improving
+                    if (is_pv_node) R_lmr--; // Less reduction in PV nodes
                 }
+                R_lmr = std::max(0, R_lmr);
 
                 score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
+                
                 if (score > alpha && R_lmr > 0) { // Re-search if reduction was too aggressive
                      score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_move);
                 }
@@ -1616,12 +1765,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
                         // Penalize the quiet moves that came before this one
-                        for (int j = 0; j < i; ++j) {
-                            const Move& bad_move = moves[j];
-                            if (pos.piece_on_sq(bad_move.to) == NO_PIECE && bad_move.promotion == NO_PIECE) {
-                                int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
-                                bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
-                            }
+                        for (const Move& bad_move : quiet_moves_for_history) {
+                             if(bad_move == current_move) continue;
+                             int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
+                             bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
                         }
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
@@ -1774,7 +1921,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.41\n";
+            std::cout << "id name Amira 1.43\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
