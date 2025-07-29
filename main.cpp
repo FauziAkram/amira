@@ -184,7 +184,7 @@ struct Position {
     Piece piece_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_PIECE;
         uint64_t b = set_bit(sq);
-        if (!( (color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
+        if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
         for (int p = PAWN; p <= KING; ++p)
             if (piece_bb[p] & b) return (Piece)p;
         return NO_PIECE; // Should not be reached if occupied bit was set
@@ -1583,9 +1583,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     int original_alpha = alpha;
     Move tt_move = NULL_MOVE;
     int tt_score;
-    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score)) {
+    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score))
         return tt_score;
-    }
 
     int static_eval = evaluate(pos);
     search_path_evals[ply] = static_eval;
