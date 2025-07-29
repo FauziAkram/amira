@@ -1387,7 +1387,6 @@ int see(const Position& pos, const Move& move) {
     int gain[32];
     int d = 0;
     uint64_t from_bb = set_bit(move.from);
-    uint64_t to_bb = set_bit(move.to);
     uint64_t occupied = pos.get_occupied_bb();
 
     Color stm = pos.color_on_sq(move.from);
