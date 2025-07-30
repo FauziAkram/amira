@@ -360,7 +360,6 @@ void init_magic_bitboards() {
     }
 }
 
-
 inline uint64_t get_rook_attacks(int sq, uint64_t occupied) {
     uint64_t blockers = occupied & magic_rook_mask[sq];
     uint64_t index = (blockers * magic_rook[sq]) >> magic_rook_shift[sq];
@@ -410,7 +409,6 @@ uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occu
     attackers |= get_rook_attacks(sq_to_check, occupied) & (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]);
     return attackers;
 }
-
 
 // --- Move Generation (updated with magic bitboards) --- //
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
@@ -782,7 +780,6 @@ const int ATTACK_RANK_KING_TRAP_MG = 15;
 const int ATTACK_RANK_KING_TRAP_EG = 20;
 const int ATTACK_RANK_CONNECTIVITY_MG = 12;
 const int ATTACK_RANK_CONNECTIVITY_EG = 18;
-
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
