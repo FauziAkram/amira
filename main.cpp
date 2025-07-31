@@ -1963,7 +1963,6 @@ void uci_loop() {
 
                 if (my_inc > 0) {
                     // --- INCREMENT TIME CONTROL ---
-                    // Per user request, this original logic is preserved for increment controls.
                     double soft_limit_s = my_time * 0.000052;
                     double hard_limit_s = my_time * 0.00041;
                     soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
