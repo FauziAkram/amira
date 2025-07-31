@@ -850,9 +850,8 @@ bool is_insufficient_material(const Position& pos) {
     // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
     if (white_minors == 1 && black_minors == 1) return true;
 
-    // Case: K+N+N vs K (generally treated as a draw)
-    if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
-        (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
+    // CORRECTNESS FIX: K+N+N vs K is NOT a draw by insufficient material, mate is possible.
+    // The original check has been removed.
 
     // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
     return false;
@@ -1586,7 +1585,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
 
-    std::vector<Move> quiet_moves_for_history;
+    // PERFORMANCE FIX: Use a stack-allocated array instead of std::vector
+    Move quiet_moves_for_history[256];
+    int quiet_moves_count = 0;
 
     while(!(current_move = picker.next_move()).is_null()) {
         bool legal;
@@ -1618,7 +1619,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
 
             if (is_quiet)
-                quiet_moves_for_history.push_back(current_move);
+                quiet_moves_for_history[quiet_moves_count++] = current_move;
 
             if (legal_moves_played == 1) // PVS: First move gets full window search
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
@@ -1671,7 +1672,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
 
                         // Penalize the quiet moves that came before this one
-                        for (const Move& bad_move : quiet_moves_for_history) {
+                        for (int i = 0; i < quiet_moves_count; ++i) {
+                             const Move& bad_move = quiet_moves_for_history[i];
                              if(bad_move == current_move) continue;
                              int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
                              bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
@@ -1825,7 +1827,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.45\n";
+            std::cout << "id name Amira 1.45 (Minimal Fix)\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1969,26 +1971,12 @@ void uci_loop() {
                     hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
                 } else {
                     // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
                     int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
                     long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
                     allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
                     if (allocated_time_ms >= my_time)
                         allocated_time_ms = my_time - 100; // Leave 100ms
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                 }
