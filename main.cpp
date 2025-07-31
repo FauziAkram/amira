@@ -16,6 +16,42 @@
 #include <intrin.h>
 #endif
 
+// --- PhaseScore Structure ---
+struct PhaseScore {
+    int mg = 0;
+    int eg = 0;
+
+    PhaseScore& operator+=(const PhaseScore& other) {
+        mg += other.mg;
+        eg += other.eg;
+        return *this;
+    }
+    PhaseScore& operator-=(const PhaseScore& other) {
+        mg -= other.mg;
+        eg -= other.eg;
+        return *this;
+    }
+    PhaseScore operator+(const PhaseScore& other) const {
+        PhaseScore result = *this;
+        result += other;
+        return result;
+    }
+    PhaseScore operator-(const PhaseScore& other) const {
+        PhaseScore result = *this;
+        result -= other;
+        return result;
+    }
+    PhaseScore operator-() const {
+        return {-mg, -eg};
+    }
+    PhaseScore& operator*=(int scalar) {
+        mg *= scalar;
+        eg *= scalar;
+        return *this;
+    }
+};
+
+
 // --- Constants ---
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
@@ -53,8 +89,7 @@ int see(const Position& pos, const Move& move);
 // --- Pawn Cache ---
 struct PawnCacheEntry {
     uint64_t key = 0;
-    int mg_score = 0;
-    int eg_score = 0;
+    PhaseScore score = {};
     uint64_t white_passed_pawns = 0;
     uint64_t black_passed_pawns = 0;
 };
@@ -650,8 +685,9 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-const int piece_values_mg[6] = {100, 320, 330, 500, 900, 0}; // P,N,B,R,Q,K
-const int piece_values_eg[6] = {120, 320, 330, 530, 950, 0};
+const PhaseScore piece_phase_values[6] = {
+    {100, 120}, {320, 320}, {330, 330}, {500, 530}, {900, 950}, {0, 0}
+};
 const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // For SEE
 
 // Piece Square Tables (values are for white, mirrored for black)
@@ -710,47 +746,36 @@ uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 uint64_t adjacent_files_mask[8];
 
-const int passed_pawn_bonus_mg[8] = {0, 5, 15, 25, 40, 60, 80, 0}; // Bonus by rank (0-indexed from own side)
-const int passed_pawn_bonus_eg[8] = {0, 10, 25, 40, 60, 90, 120, 0};
+const PhaseScore passed_pawn_bonus[8] = {
+    {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
+};
 
 // --- Evaluation Constants ---
-const int TEMPO_BONUS = 8;
-const int BISHOP_PAIR_BONUS_MG = 30;
-const int BISHOP_PAIR_BONUS_EG = 50;
-const int PAWN_CONNECTED_BONUS_MG = 10;
-const int PAWN_CONNECTED_BONUS_EG = 14;
-const int protected_pawn_bonus_mg = 8;
-const int protected_pawn_bonus_eg = 12;
-const int isolated_pawn_penalty_mg = -12;
-const int isolated_pawn_penalty_eg = -20;
-const int doubled_pawn_liability_mg = -10;
-const int doubled_pawn_liability_eg = -15;
-const int hindered_pawn_penalty_mg = -8;
-const int hindered_pawn_penalty_eg = -12;
-const int knight_mobility_bonus_mg = 1;
-const int knight_mobility_bonus_eg = 2;
-const int bishop_mobility_bonus_mg = 2;
-const int bishop_mobility_bonus_eg = 3;
-const int rook_mobility_bonus_mg = 2;
-const int rook_mobility_bonus_eg = 4;
-const int queen_mobility_bonus_mg = 1;
-const int queen_mobility_bonus_eg = 2;
-const int dominant_knight_bonus_mg = 25;
-const int dominant_knight_bonus_eg = 15;
-const int dominant_bishop_bonus_mg = 20;
-const int dominant_bishop_bonus_eg = 15;
-const int potential_dominance_bonus = 5;
-const int minor_on_heavy_pressure_mg = 20;
-const int minor_on_heavy_pressure_eg = 15;
-const int rook_on_minor_pressure_mg = 15;
-const int rook_on_minor_pressure_eg = 10;
-const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
-const int ROOK_ON_OPEN_FILE_MG = 20;
-const int ROOK_ON_OPEN_FILE_EG = 15;
-const int ROOK_ON_SEMI_OPEN_FILE_MG = 10;
-const int ROOK_ON_SEMI_OPEN_FILE_EG = 5;
+const PhaseScore TEMPO_BONUS                   = {10, 10};
+const PhaseScore BISHOP_PAIR_BONUS             = {32, 55};
+const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
+const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
+const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
+const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
+const PhaseScore HINDERED_PAWN_PENALTY         = {-9, -14};
+const PhaseScore KNIGHT_MOBILITY_BONUS         = {1, 2};
+const PhaseScore BISHOP_MOBILITY_BONUS         = {2, 3};
+const PhaseScore ROOK_MOBILITY_BONUS           = {2, 4};
+const PhaseScore QUEEN_MOBILITY_BONUS          = {1, 2};
+const PhaseScore DOMINANT_KNIGHT_BONUS         = {28, 18};
+const PhaseScore DOMINANT_BISHOP_BONUS         = {22, 16};
+const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
+const PhaseScore MINOR_ON_HEAVY_PRESSURE       = {22, 17};
+const PhaseScore ROOK_ON_MINOR_PRESSURE        = {16, 11};
+const PhaseScore ROOK_ON_OPEN_FILE             = {22, 16};
+const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 7};
+const PhaseScore ROOK_ATTACK_RANK              = {28, 38};
+const PhaseScore ATTACK_RANK_KING_TRAP         = {16, 22};
+const PhaseScore ATTACK_RANK_CONNECTIVITY      = {14, 20};
 
-// --- Evaluation Constants for King Safety and Rook on 7th ---
+const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
+
+// --- Evaluation Constants for King Safety ---
 // Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
 const int knight_tropism_bonus[8] = { 20, 15, 10, 5, 2, 1, 0, 0 };
 const int bishop_tropism_bonus[8] = { 15, 12, 9,  4, 2, 1, 0, 0 };
@@ -772,14 +797,6 @@ const int SHIELD_PAWN_PRESENT_BONUS = 10;
 const int SHIELD_PAWN_MISSING_PENALTY = -20;
 const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
 const int SHIELD_OPEN_FILE_PENALTY = -15;
-
-// Rook on 7th Rank Bonuses
-const int ROOK_ATTACK_RANK_MG = 25;
-const int ROOK_ATTACK_RANK_EG = 35;
-const int ATTACK_RANK_KING_TRAP_MG = 15;
-const int ATTACK_RANK_KING_TRAP_EG = 20;
-const int ATTACK_RANK_CONNECTIVITY_MG = 12;
-const int ATTACK_RANK_CONNECTIVITY_EG = 18;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -843,7 +860,7 @@ bool is_insufficient_material(const Position& pos) {
 
 // Helper function to evaluate pawn structure for one color
 void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
-                                       int& mg_pawn_score, int& eg_pawn_score,
+                                       PhaseScore& pawn_score,
                                        uint64_t& passed_pawns) {
     uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[current_eval_color];
     uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & pos.color_bb[1 - current_eval_color];
@@ -864,27 +881,23 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
 
         // Isolated Pawn Evaluation
         if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
-            mg_pawn_score += isolated_pawn_penalty_mg;
-            eg_pawn_score += isolated_pawn_penalty_eg;
+            pawn_score += ISOLATED_PAWN_PENALTY;
         }
 
         // Protected Pawn Evaluation
         if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
-            mg_pawn_score += protected_pawn_bonus_mg;
-            eg_pawn_score += protected_pawn_bonus_eg;
+            pawn_score += PROTECTED_PAWN_BONUS;
         }
 
         // Connected Pawn (Phalanx) Bonus
         if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
-            mg_pawn_score += PAWN_CONNECTED_BONUS_MG;
-            eg_pawn_score += PAWN_CONNECTED_BONUS_EG;
+            pawn_score += PAWN_CONNECTED_BONUS;
         }
         
         // Doubled Pawn Evaluation
         uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
         if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
-                mg_pawn_score += doubled_pawn_liability_mg;
-                eg_pawn_score += doubled_pawn_liability_eg;
+            pawn_score += DOUBLED_PAWN_PENALTY;
         }
         
         // Backward Pawn Evaluation
@@ -893,8 +906,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
             int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
             if (get_bit(enemy_pawn_attacks, push_sq)) {
-                mg_pawn_score += hindered_pawn_penalty_mg;
-                eg_pawn_score += hindered_pawn_penalty_eg;
+                pawn_score += HINDERED_PAWN_PENALTY;
             }
         }
 
@@ -908,50 +920,42 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         if (is_passed) {
             passed_pawns |= set_bit(sq);
             int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-            mg_pawn_score += passed_pawn_bonus_mg[rank_from_own_side];
-            eg_pawn_score += passed_pawn_bonus_eg[rank_from_own_side];
+            pawn_score += passed_pawn_bonus[rank_from_own_side];
         }
     }
 }
 
 int evaluate(Position& pos) {
-    // Check for insufficient material draw at the beginning of evaluation.
-    if (is_insufficient_material(pos)) return 0; // Draw score
+    if (is_insufficient_material(pos)) return 0; 
 
-    int mg_score = 0, eg_score = 0, game_phase = 0;
-    int mg_mobility_score = 0, eg_mobility_score = 0;
+    PhaseScore final_score;
+    int game_phase = 0;
     
     // --- Pawn Evaluation (with Caching) ---
-    int mg_pawn_score = 0;
-    int eg_pawn_score = 0;
+    PhaseScore pawn_score;
     uint64_t white_passed_pawns = 0;
     uint64_t black_passed_pawns = 0;
 
     PawnCacheEntry& pawn_entry = pawn_evaluation_cache[pos.pawn_zobrist_key & pawn_cache_mask];
     if (pawn_entry.key == pos.pawn_zobrist_key) {
         // Cache hit
-        mg_pawn_score = pawn_entry.mg_score;
-        eg_pawn_score = pawn_entry.eg_score;
+        pawn_score = pawn_entry.score;
         white_passed_pawns = pawn_entry.white_passed_pawns;
         black_passed_pawns = pawn_entry.black_passed_pawns;
     } else {
         // Cache miss: evaluate and store
-        int white_mg = 0, white_eg = 0;
-        int black_mg = 0, black_eg = 0;
-        evaluate_pawn_structure_for_color(pos, WHITE, white_mg, white_eg, white_passed_pawns);
-        evaluate_pawn_structure_for_color(pos, BLACK, black_mg, black_eg, black_passed_pawns);
+        PhaseScore white_pawn_score, black_pawn_score;
+        evaluate_pawn_structure_for_color(pos, WHITE, white_pawn_score, white_passed_pawns);
+        evaluate_pawn_structure_for_color(pos, BLACK, black_pawn_score, black_passed_pawns);
         
-        mg_pawn_score = white_mg - black_mg;
-        eg_pawn_score = white_eg - black_eg;
+        pawn_score = white_pawn_score - black_pawn_score;
         
         pawn_entry.key = pos.pawn_zobrist_key;
-        pawn_entry.mg_score = mg_pawn_score;
-        pawn_entry.eg_score = eg_pawn_score;
+        pawn_entry.score = pawn_score;
         pawn_entry.white_passed_pawns = white_passed_pawns;
         pawn_entry.black_passed_pawns = black_passed_pawns;
     }
-    mg_score += mg_pawn_score;
-    eg_score += eg_pawn_score;
+    final_score += pawn_score;
     // --- End of Pawn Evaluation ---
 
     // Attack bitboards for threat evaluation
@@ -960,9 +964,9 @@ int evaluate(Position& pos) {
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         Color enemy_color = (Color)(1-c_idx);
-        int side_multiplier = (current_eval_color == WHITE) ? 1 : -1;
         
-        // Helper bitboards for mobility and pawn structure
+        PhaseScore current_color_score;
+        
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
         uint64_t attackable_squares = ~friendly_pieces;
@@ -970,7 +974,6 @@ int evaluate(Position& pos) {
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
         
-        // Pre-calculate enemy pawn attacks once per color evaluation.
         uint64_t enemy_pawn_attacks = 0;
         uint64_t temp_enemy_pawns_for_attack_map = all_enemy_pawns;
         while(temp_enemy_pawns_for_attack_map) {
@@ -979,7 +982,6 @@ int evaluate(Position& pos) {
             temp_enemy_pawns_for_attack_map &= temp_enemy_pawns_for_attack_map - 1;
         }
         
-        // Material, PST, and Feature Evaluation
         for (int p = PAWN; p <= KING; ++p) {
             uint64_t b = pos.piece_bb[p] & pos.color_bb[current_eval_color];
             game_phase += pop_count(b) * game_phase_inc[p];
@@ -988,20 +990,19 @@ int evaluate(Position& pos) {
                 b &= b - 1;
                 int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
 
-                mg_score += side_multiplier * (piece_values_mg[p] + pst_mg_all[p][mirrored_sq]);
-                eg_score += side_multiplier * (piece_values_eg[p] + pst_eg_all[p][mirrored_sq]);
+                current_color_score += piece_phase_values[p];
+                current_color_score.mg += pst_mg_all[p][mirrored_sq];
+                current_color_score.eg += pst_eg_all[p][mirrored_sq];
 
                 if ((Piece)p == PAWN) {
                     uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
                     if (get_bit(current_passed_pawns, sq)) {
-                        // Passed Pawn distance to enemy king
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
                         if (enemy_king_sq != -1) {
                             int pawn_rank = sq / 8; int pawn_file = sq % 8;
                             int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
                             int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), std::abs(pawn_file - king_file));
-                            // Bonus increases the further the king is, making it harder to stop the pawn
-                            eg_score += side_multiplier * dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
+                            current_color_score.eg += dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
                         }
                     }
                 } else if ((Piece)p == ROOK) {
@@ -1009,64 +1010,46 @@ int evaluate(Position& pos) {
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
                     if (!friendly_pawn_on_file) {
-                        if (!enemy_pawn_on_file) { // Open file
-                            mg_score += side_multiplier * ROOK_ON_OPEN_FILE_MG; 
-                            eg_score += side_multiplier * ROOK_ON_OPEN_FILE_EG; 
-                        } else { // Semi-open file
-                            mg_score += side_multiplier * ROOK_ON_SEMI_OPEN_FILE_MG; 
-                            eg_score += side_multiplier * ROOK_ON_SEMI_OPEN_FILE_EG;
-                        } 
+                        if (!enemy_pawn_on_file) current_color_score += ROOK_ON_OPEN_FILE; 
+                        else current_color_score += ROOK_ON_SEMI_OPEN_FILE;
                     }
                     
-                    // --- Rook on Attack Rank Bonus ---
                     int attack_rank = (current_eval_color == WHITE) ? 6 : 1;
                     if (sq / 8 == attack_rank) {
-                        mg_score += side_multiplier * ROOK_ATTACK_RANK_MG;
-                        eg_score += side_multiplier * ROOK_ATTACK_RANK_EG;
-
+                        current_color_score += ROOK_ATTACK_RANK;
                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
-                        if (enemy_king_sq != -1) {
-                            int enemy_back_rank = (enemy_color == WHITE) ? 0 : 7;
-                            if (enemy_king_sq / 8 == enemy_back_rank) {
-                                mg_score += side_multiplier * ATTACK_RANK_KING_TRAP_MG;
-                                eg_score += side_multiplier * ATTACK_RANK_KING_TRAP_EG;
-                            }
+                        if (enemy_king_sq != -1 && (enemy_king_sq / 8 == ((enemy_color == WHITE) ? 0 : 7))) {
+                            current_color_score += ATTACK_RANK_KING_TRAP;
                         }
-                        
                         uint64_t friendly_heavies = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & friendly_pieces;
                         if (get_rook_attacks(sq, occupied) & friendly_heavies & ~set_bit(sq)) {
-                            mg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_MG;
-                            eg_score += side_multiplier * ATTACK_RANK_CONNECTIVITY_EG;
+                            current_color_score += ATTACK_RANK_CONNECTIVITY;
                         }
                     }
 
-                    // Rook Mobility
                     uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * rook_mobility_bonus_eg;
+                    PhaseScore mobility_score = ROOK_MOBILITY_BONUS;
+                    mobility_score *= mobility_count;
+                    current_color_score += mobility_score;
                 }
-                // Mobility and other piece features
                 else if ((Piece)p == KNIGHT) {
                     uint64_t mobility_attacks = knight_attacks_bb[sq];
                     piece_attacks_bb[c_idx][KNIGHT] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * knight_mobility_bonus_eg;
+                    PhaseScore mobility_score = KNIGHT_MOBILITY_BONUS;
+                    mobility_score *= mobility_count;
+                    current_color_score += mobility_score;
 
-                    // Knight Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
-                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
-                             if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
-                                mg_score += side_multiplier * dominant_knight_bonus_mg;
-                                eg_score += side_multiplier * dominant_knight_bonus_eg;
-                            }
+                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, sq)) {
+                            current_color_score += DOMINANT_KNIGHT_BONUS;
                         }
                     }
-                    // Potential Outpost
+
                     uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
                     while(potential_outpost_moves) {
                         int to_sq = lsb_index(potential_outpost_moves);
@@ -1075,8 +1058,8 @@ int evaluate(Position& pos) {
                         int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
                         if (to_relative_rank >= 3 && to_relative_rank <=5) {
                             if (get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, to_sq)) {
-                                mg_score += side_multiplier * potential_dominance_bonus;
-                                break; // Only count once per piece
+                                current_color_score += POTENTIAL_DOMINANCE_BONUS;
+                                break;
                             }
                         }
                     }
@@ -1084,60 +1067,56 @@ int evaluate(Position& pos) {
                     uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * bishop_mobility_bonus_eg;
+                    PhaseScore mobility_score = BISHOP_MOBILITY_BONUS;
+                    mobility_score *= mobility_count;
+                    current_color_score += mobility_score;
 
-                    // Bishop Outpost Bonus
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
-                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns)) { // Supported by own pawn
-                             if (!get_bit(enemy_pawn_attacks, sq)) { // Not attacked by enemy pawn
-                                mg_score += side_multiplier * dominant_bishop_bonus_mg;
-                                eg_score += side_multiplier * dominant_bishop_bonus_eg;
-                            }
+                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) {
+                        if (get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns) && !get_bit(enemy_pawn_attacks, sq)) {
+                           current_color_score += DOMINANT_BISHOP_BONUS;
                         }
                     }
                 } else if ((Piece)p == QUEEN) {
                     uint64_t mobility_attacks = get_queen_attacks(sq, occupied);
                     piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
                     int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    mg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_mg;
-                    eg_mobility_score += side_multiplier * mobility_count * queen_mobility_bonus_eg;
+                    PhaseScore mobility_score = QUEEN_MOBILITY_BONUS;
+                    mobility_score *= mobility_count;
+                    current_color_score += mobility_score;
                 } else if ((Piece)p == KING) {
                     piece_attacks_bb[c_idx][KING] |= king_attacks_bb[sq];
                 }
             }
         }
         if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
-            mg_score += side_multiplier * BISHOP_PAIR_BONUS_MG; 
-            eg_score += side_multiplier * BISHOP_PAIR_BONUS_EG;
+            current_color_score += BISHOP_PAIR_BONUS; 
         }
 
-        // --- Tactical Pressure & Threats ---
         uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
         uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
 
-        // Minor pieces attacking heavy pieces
         uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
-        if (pop_count(minor_attacks & enemy_rooks_and_queens) > 0) {
-            mg_score += side_multiplier * minor_on_heavy_pressure_mg * pop_count(minor_attacks & enemy_rooks_and_queens);
-            eg_score += side_multiplier * minor_on_heavy_pressure_eg * pop_count(minor_attacks & enemy_rooks_and_queens);
+        int pressure_count = pop_count(minor_attacks & enemy_rooks_and_queens);
+        if (pressure_count > 0) {
+            PhaseScore pressure_score = MINOR_ON_HEAVY_PRESSURE;
+            pressure_score *= pressure_count;
+            current_color_score += pressure_score;
         }
 
-        // Rooks attacking minor pieces
-        if (pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops) > 0) {
-             mg_score += side_multiplier * rook_on_minor_pressure_mg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
-             eg_score += side_multiplier * rook_on_minor_pressure_eg * pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
+        pressure_count = pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
+        if (pressure_count > 0) {
+            PhaseScore pressure_score = ROOK_ON_MINOR_PRESSURE;
+            pressure_score *= pressure_count;
+            current_color_score += pressure_score;
         }
 
         // --- King Safety and Shelter Evaluation ---
         int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
         if (king_sq != -1) {
-            // PART 1: King Shelter (Pawn Shield)
             int shelter_score = 0;
-            int king_file = king_sq % 8;
-            int king_rank = king_sq / 8;
+            int king_file = king_sq % 8, king_rank = king_sq / 8;
             int shield_f_start = std::max(0, king_file - 1);
             int shield_f_end = std::min(7, king_file + 1);
             int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
@@ -1146,7 +1125,6 @@ int evaluate(Position& pos) {
             if (shield_rank_1 >= 0 && shield_rank_1 < 8) {
                 for (int f = shield_f_start; f <= shield_f_end; ++f) {
                     uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
-
                     if (!friendly_pawns_on_file) {
                         shelter_score += SHIELD_PAWN_MISSING_PENALTY;
                         if (!(file_bb_mask[f] & all_enemy_pawns))
@@ -1154,73 +1132,45 @@ int evaluate(Position& pos) {
                     } else {
                         bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
                         bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
-
-                        if (pawn_on_shield_rank_1)
-                            shelter_score += SHIELD_PAWN_PRESENT_BONUS;
-                        else if (pawn_on_shield_rank_2)
-                            shelter_score += SHIELD_PAWN_ADVANCED_PENALTY;
-                        else
-                            shelter_score += SHIELD_PAWN_MISSING_PENALTY;
+                        if (pawn_on_shield_rank_1) shelter_score += SHIELD_PAWN_PRESENT_BONUS;
+                        else if (pawn_on_shield_rank_2) shelter_score += SHIELD_PAWN_ADVANCED_PENALTY;
+                        else shelter_score += SHIELD_PAWN_MISSING_PENALTY;
                     }
                 }
             }
 
             int home_rank = (current_eval_color == WHITE) ? 0 : 7;
             if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
-                mg_score += side_multiplier * shelter_score;
+                current_color_score.mg += shelter_score;
 
-            // PART 2: King Threat Assessment via Piece Tropism
             int attack_proximity_score = 0;
-            
             uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_pieces;
-            while (enemy_knights) {
-                int attacker_sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
-                attack_proximity_score += knight_tropism_bonus[dist];
-            }
+            while (enemy_knights) { int sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1; attack_proximity_score += knight_tropism_bonus[std::max(std::abs(king_rank - sq/8), std::abs(king_file - sq%8))]; }
             uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_pieces;
-            while (enemy_bishops) {
-                int attacker_sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
-                attack_proximity_score += bishop_tropism_bonus[dist];
-            }
+            while (enemy_bishops) { int sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1; attack_proximity_score += bishop_tropism_bonus[std::max(std::abs(king_rank - sq/8), std::abs(king_file - sq%8))]; }
             uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_pieces;
-            while (enemy_rooks) {
-                int attacker_sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
-                attack_proximity_score += rook_tropism_bonus[dist];
-            }
+            while (enemy_rooks) { int sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1; attack_proximity_score += rook_tropism_bonus[std::max(std::abs(king_rank - sq/8), std::abs(king_file - sq%8))]; }
             uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_pieces;
-            while (enemy_queens) {
-                int attacker_sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1;
-                int dist = std::max(std::abs(king_rank - attacker_sq/8), std::abs(king_file - attacker_sq%8));
-                attack_proximity_score += queen_tropism_bonus[dist];
-            }
+            while (enemy_queens) { int sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1; attack_proximity_score += queen_tropism_bonus[std::max(std::abs(king_rank - sq/8), std::abs(king_file - sq%8))]; }
 
-            int danger_idx = std::min(attack_proximity_score / 10, 30); // Scale and cap index
-            mg_score -= side_multiplier * king_threat_penalty_mg[danger_idx];
-            eg_score -= side_multiplier * king_threat_penalty_eg[danger_idx];
+            int danger_idx = std::min(attack_proximity_score / 10, 30);
+            current_color_score.mg -= king_threat_penalty_mg[danger_idx];
+            current_color_score.eg -= king_threat_penalty_eg[danger_idx];
         }
+
+        if (current_eval_color == WHITE)
+            final_score += current_color_score;
+        else
+            final_score -= current_color_score;
     }
 
-    // Incorporate mobility scores
-    mg_score += mg_mobility_score;
-    eg_score += eg_mobility_score;
-
-    // Add tempo bonus to the side to move
-    if (pos.side_to_move == WHITE) {
-        mg_score += TEMPO_BONUS;
-        eg_score += TEMPO_BONUS;
-    } else {
-        mg_score -= TEMPO_BONUS;
-        eg_score -= TEMPO_BONUS;
-    }
+    final_score += (pos.side_to_move == WHITE ? TEMPO_BONUS : -TEMPO_BONUS);
 
     game_phase = std::min(game_phase, 24);
     game_phase = std::max(game_phase, 0);
 
-    int final_score_from_white_pov = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
-    pos.static_eval = (pos.side_to_move == WHITE) ? final_score_from_white_pov : -final_score_from_white_pov;
+    int final_eval = (final_score.mg * game_phase + final_score.eg * (24 - game_phase)) / 24;
+    pos.static_eval = (pos.side_to_move == WHITE) ? final_eval : -final_eval;
     return pos.static_eval;
 }
 
@@ -1875,7 +1825,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.44\n";
+            std::cout << "id name Amira 1.45\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
