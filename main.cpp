@@ -62,6 +62,7 @@ constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
+constexpr int NO_EVAL_STORED = INF_SCORE + 1; // A value that evaluate() should not return
 
 // Castling rights masks
 constexpr uint8_t WK_CASTLE_MASK = 1;
@@ -1181,6 +1182,7 @@ struct TTEntry {
     Move best_move = NULL_MOVE;
     int score = 0;
     int depth = 0;
+    int static_eval = 0;
     TTBound bound = TT_NONE;
 };
 
@@ -1220,12 +1222,13 @@ void clear_tt() {
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
 }
 
-bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt) {
+bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt, int& eval_from_tt) {
     if (tt_mask == 0 || !g_tt_is_initialized) return false;
     TTEntry& entry = transposition_table[hash & tt_mask];
 
     if (entry.hash == hash && entry.bound != TT_NONE) {
         move_from_tt = entry.best_move;
+        eval_from_tt = entry.static_eval;
         if (entry.depth >= depth) {
             int stored_score = entry.score;
             if (stored_score > MATE_THRESHOLD) stored_score -= ply;
@@ -1240,7 +1243,7 @@ bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& mo
     return false;
 }
 
-void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move) {
+void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move, int static_eval) {
     if (tt_mask == 0 || !g_tt_is_initialized) return;
     TTEntry& entry = transposition_table[hash & tt_mask];
 
@@ -1257,6 +1260,7 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
         entry.depth = depth;
         entry.score = score;
         entry.bound = bound;
+        entry.static_eval = static_eval;
         if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER)
              entry.best_move = best_move;
     }
@@ -1529,10 +1533,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     int original_alpha = alpha;
     Move tt_move = NULL_MOVE;
     int tt_score;
-    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score))
+    int tt_eval = NO_EVAL_STORED;
+    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score, tt_eval))
         return tt_score;
 
-    int static_eval = evaluate(pos);
+    int static_eval = (tt_eval != NO_EVAL_STORED) ? tt_eval : evaluate(pos);
     search_path_evals[ply] = static_eval;
 
     // --- Modern Pruning Techniques ---
@@ -1574,7 +1579,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
                  if (null_score >= MATE_THRESHOLD) null_score = beta;
-                 store_tt(pos.zobrist_hash, depth, ply, null_score, TT_LOWER, NULL_MOVE);
+                 store_tt(pos.zobrist_hash, depth, ply, null_score, TT_LOWER, NULL_MOVE, static_eval);
                  return beta;
             }
     }
@@ -1677,7 +1682,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                              bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
                         }
                     }
-                    store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found);
+                    store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found, static_eval);
                     return beta; // Fail-high
                 }
             }
@@ -1688,7 +1693,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         return in_check ? (-MATE_SCORE + ply) : 0;
 
     TTBound final_bound_type = (best_score > original_alpha) ? TT_EXACT : TT_UPPER;
-    store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found);
+    store_tt(pos.zobrist_hash, depth, ply, best_score, final_bound_type, best_move_found, static_eval);
     return best_score;
 }
 
@@ -1825,7 +1830,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.45\n";
+            std::cout << "id name Amira 1.46\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -2028,9 +2033,9 @@ void uci_loop() {
                     aspiration_window_delta = 50;
                 }
 
-                Move tt_root_move = NULL_MOVE; int tt_root_score;
+                Move tt_root_move = NULL_MOVE; int tt_root_score, tt_root_eval; // tt_root_eval is unused here
                 int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
-                if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score)) {
+                if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score, tt_root_eval)) {
                      if (!tt_root_move.is_null()) uci_best_move_overall = tt_root_move;
                      best_score_overall = current_score;
                 } else {
@@ -2054,8 +2059,8 @@ void uci_loop() {
                     std::cout << " pv";
                     Position temp_pos = uci_root_pos;
                     for (int pv_idx = 0; pv_idx < depth; ++pv_idx) {
-                        Move pv_m; int pv_s; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
-                        if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s) && !pv_m.is_null()) {
+                        Move pv_m; int pv_s, pv_e; int pv_a = -INF_SCORE, pv_b = INF_SCORE;
+                        if (probe_tt(temp_pos.zobrist_hash, 1, 0, pv_a, pv_b, pv_m, pv_s, pv_e) && !pv_m.is_null()) {
                             bool legal_pv;
                             Position next_temp_pos = make_move(temp_pos, pv_m, legal_pv);
                             if (legal_pv) {
