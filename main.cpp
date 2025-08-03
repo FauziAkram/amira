@@ -1282,6 +1282,9 @@ int move_history_score[2][64][64];
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
 constexpr int MAX_HISTORY_SCORE = 24000;
+constexpr int TACTICAL_LOOKAHEAD_MIN_DEPTH = 5;
+constexpr int TACTICAL_LOOKAHEAD_MARGIN = 110;
+constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
 
 // Repetition Detection Data Structures
 uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
@@ -1584,6 +1587,35 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
+        // --- Tactical Lookahead Pruning ---
+    if (!is_pv_node && !in_check && depth >= TACTICAL_LOOKAHEAD_MIN_DEPTH && std::abs(beta) < MATE_THRESHOLD) {
+        int raised_beta = beta + TACTICAL_LOOKAHEAD_MARGIN;
+
+        MovePicker tactical_picker(pos, ply, NULL_MOVE, NULL_MOVE, true);
+        Move tactical_move;
+        while (!(tactical_move = tactical_picker.next_move()).is_null()) {
+            // Prune moves that are unlikely to raise alpha significantly. We use SEE to estimate this.
+            if (static_eval + see(pos, tactical_move) + 200 < raised_beta)
+                continue;
+
+            bool is_legal;
+            Position next_pos = make_move(pos, tactical_move, is_legal);
+            if (!is_legal) continue;
+
+            // Search with a reduced depth and the raised beta
+            int tactical_score = -search(next_pos, depth - 1 - TACTICAL_LOOKAHEAD_REDUCTION,
+                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move);
+
+            if (stop_search_flag) return 0;
+
+            if (tactical_score >= raised_beta) {
+                // The tactical lookahead was successful. We assume a cutoff.
+                store_tt(pos.zobrist_hash, depth - TACTICAL_LOOKAHEAD_REDUCTION, ply, beta, TT_LOWER, tactical_move, static_eval);
+                return beta; // Prune the node
+            }
+        }
+    }
+
     MovePicker picker(pos, ply, tt_move, prev_move);
     Move current_move;
     
@@ -1830,7 +1862,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.46\n";
+            std::cout << "id name Amira 1.47\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -1862,9 +1894,8 @@ void uci_loop() {
             if (!g_tt_is_initialized) {
                  init_tt(g_configured_tt_size_mb);
                  g_tt_is_initialized = true;
-            } else {
+            } else
                  clear_tt();
-            }
             clear_pawn_cache();
             reset_search_heuristics();
             game_history_length = 0;
