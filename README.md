@@ -14,6 +14,7 @@ This engine was developed as an exercise in creating a competitive chess program
 
 The original episode where Amira was created is part of the "Coding a Chess Engine" series on the ChessTubeTree channel. Watch the first episode here:
 *   **First Episode:** [https://www.youtube.com/watch?v=UiWe2E56PWI](https://www.youtube.com/watch?v=UiWe2E56PWI)
+*   **Second Episode:** [https://www.youtube.com/watch?v=KCu174tZb3g](https://www.youtube.com/watch?v=KCu174tZb3g)
 
 ## Key Features
 
