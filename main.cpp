@@ -937,7 +937,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
     }
 }
 
-// New Function: get_endgame_material_modifier
+// --- Endgame Scaling ---
 // Scales the evaluation in the endgame to account for drawish tendencies.
 // Returns a factor from 0 to 256. 256 means no change.
 int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) {
@@ -2212,3 +2212,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
