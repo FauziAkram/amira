@@ -76,6 +76,12 @@ constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
 constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
 constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
 
+// --- FIX: Add masks for castling paths to remove redundant checks ---
+constexpr uint64_t WK_CASTLE_PATH = (1ULL << (E1_SQ + 1)) | (1ULL << (E1_SQ + 2));
+constexpr uint64_t WQ_CASTLE_PATH = (1ULL << (E1_SQ - 1)) | (1ULL << (E1_SQ - 2)) | (1ULL << (E1_SQ - 3));
+constexpr uint64_t BK_CASTLE_PATH = (1ULL << (E8_SQ + 1)) | (1ULL << (E8_SQ + 2));
+constexpr uint64_t BQ_CASTLE_PATH = (1ULL << (E8_SQ - 1)) | (1ULL << (E8_SQ - 2)) | (1ULL << (E8_SQ - 3));
+
 // Forward Declarations
 struct Move;
 struct Position;
@@ -528,21 +534,23 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
         int king_sq_idx = lsb_index(pos.piece_bb[KING] & my_pieces);
         if (king_sq_idx != -1) { // Should always be true in a valid position
             if (stm == WHITE) {
+                // --- FIX: Use path masks instead of redundant get_bit calls ---
                 if ((pos.castling_rights & WK_CASTLE_MASK) && king_sq_idx == E1_SQ &&
-                    !get_bit(occupied, E1_SQ + 1) && !get_bit(occupied, E1_SQ + 2) && // F1, G1 empty
+                    (occupied & WK_CASTLE_PATH) == 0 &&
                     !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ + 1, BLACK) && !is_square_attacked(pos, E1_SQ + 2, BLACK))
                     moves_list[move_count++] = {king_sq_idx, E1_SQ + 2}; // King to G1
                 if ((pos.castling_rights & WQ_CASTLE_MASK) && king_sq_idx == E1_SQ &&
-                    !get_bit(occupied, E1_SQ - 1) && !get_bit(occupied, E1_SQ - 2) && !get_bit(occupied, E1_SQ - 3) && // D1, C1, B1 empty
+                    (occupied & WQ_CASTLE_PATH) == 0 &&
                     !is_square_attacked(pos, E1_SQ, BLACK) && !is_square_attacked(pos, E1_SQ - 1, BLACK) && !is_square_attacked(pos, E1_SQ - 2, BLACK))
                     moves_list[move_count++] = {king_sq_idx, E1_SQ - 2}; // King to C1
             } else { // BLACK
+                // --- FIX: Use path masks instead of redundant get_bit calls ---
                 if ((pos.castling_rights & BK_CASTLE_MASK) && king_sq_idx == E8_SQ &&
-                    !get_bit(occupied, E8_SQ + 1) && !get_bit(occupied, E8_SQ + 2) && // F8, G8 empty
+                    (occupied & BK_CASTLE_PATH) == 0 &&
                     !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ + 1, WHITE) && !is_square_attacked(pos, E8_SQ + 2, WHITE))
                     moves_list[move_count++] = {king_sq_idx, E8_SQ + 2}; // King to G8
                 if ((pos.castling_rights & BQ_CASTLE_MASK) && king_sq_idx == E8_SQ &&
-                    !get_bit(occupied, E8_SQ - 1) && !get_bit(occupied, E8_SQ - 2) && !get_bit(occupied, E8_SQ - 3) && // D8, C8, B8 empty
+                    (occupied & BQ_CASTLE_PATH) == 0 &&
                     !is_square_attacked(pos, E8_SQ, WHITE) && !is_square_attacked(pos, E8_SQ - 1, WHITE) && !is_square_attacked(pos, E8_SQ - 2, WHITE))
                     moves_list[move_count++] = {king_sq_idx, E8_SQ - 2}; // King to C8
             }
@@ -2171,24 +2179,26 @@ void uci_loop() {
                 if (depth >= max_depth_to_search) break;
             }
 
-            if (!uci_best_move_overall.is_null())
+            if (!uci_best_move_overall.is_null()) {
                  std::cout << "bestmove " << move_to_uci(uci_best_move_overall) << std::endl;
-            else {
+            } else {
+                // --- FIX: Replace inefficient and redundant fallback logic ---
                 Move legal_moves_fallback[256];
                 int num_fallback_moves = generate_moves(uci_root_pos, legal_moves_fallback, false);
                 bool found_one_legal_fallback = false;
                 for(int i = 0; i < num_fallback_moves; ++i) {
-                    const auto& m_fall = legal_moves_fallback[i];
-                    bool is_leg_fall;
-                    make_move(uci_root_pos, m_fall, is_leg_fall);
-                    if (is_leg_fall) {
-                        std::cout << "bestmove " << move_to_uci(m_fall) << std::endl;
+                    bool is_legal_flag;
+                    // Only need to check for legality, no need to store the resulting position.
+                    make_move(uci_root_pos, legal_moves_fallback[i], is_legal_flag);
+                    if (is_legal_flag) {
+                        std::cout << "bestmove " << move_to_uci(legal_moves_fallback[i]) << std::endl;
                         found_one_legal_fallback = true;
                         break;
                     }
                 }
-                if (!found_one_legal_fallback)
+                if (!found_one_legal_fallback) {
                      std::cout << "bestmove 0000\n" << std::flush;
+                }
             }
 
         } else if (token == "quit" || token == "stop") {
@@ -2212,4 +2222,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
