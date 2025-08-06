@@ -692,7 +692,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
 // --- Evaluation ---
 const PhaseScore piece_phase_values[6] = {
-    {100, 120}, {320, 320}, {330, 330}, {500, 530}, {900, 950}, {0, 0}
+    {91, 132}, {373, 398}, {386, 420}, {564, 667}, {1096, 1287}, {0, 0}
 };
 const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // For SEE
 
@@ -758,8 +758,8 @@ const PhaseScore passed_pawn_bonus[8] = {
 };
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {10, 10};
-const PhaseScore BISHOP_PAIR_BONUS             = {32, 55};
+const PhaseScore TEMPO_BONUS                   = {15, 15};
+const PhaseScore BISHOP_PAIR_BONUS             = {27, 72};
 const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
@@ -774,9 +774,9 @@ const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
 const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
 const PhaseScore MINOR_ON_HEAVY_PRESSURE       = {22, 17};
 const PhaseScore ROOK_ON_MINOR_PRESSURE        = {16, 11};
-const PhaseScore ROOK_ON_OPEN_FILE             = {22, 16};
-const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 7};
-const PhaseScore ROOK_ON_SEVENTH_BONUS         = {25, 35};
+const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
+const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
+const PhaseScore ROOK_ON_SEVENTH_BONUS         = {12, 39};
 
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 
@@ -1921,7 +1921,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.48a\n";
+            std::cout << "id name Amira 1.49\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
