@@ -1499,14 +1499,13 @@ void MovePicker::score_all_moves() {
 
         bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
         
-        if (is_capture || m.promotion != NO_PIECE) {
-             if (see(m_pos, m) >= 0) {
-                Piece moved = m_pos.piece_on_sq(m.from);
-                Piece captured = m_pos.piece_on_sq(m.to);
-                if (captured == NO_PIECE) captured = PAWN; // En-passant case
-                m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
-             } else
-                 m.score = -1000000; // Bad capture
+        // Use simple MVV-LVA for scoring. A full SEE check is too expensive for ordering all captures.
+            // The search itself will prune bad captures effectively.
+            Piece p_type_moved = m_pos.piece_on_sq(m.from);
+            Piece p_type_captured = (m_pos.ep_square == m.to && p_type_moved == PAWN) ? PAWN : m_pos.piece_on_sq(m.to);
+            
+            int promotion_bonus = m.promotion != NO_PIECE ? see_piece_values[m.promotion] * 100 : 0;
+            m.score = 2000000 + promotion_bonus + (see_piece_values[p_type_captured] * 100) - see_piece_values[p_type_moved];
         } else { // Quiet moves
             if (!refutation.is_null() && m == refutation)
                 m.score = 1000000;
@@ -2215,3 +2214,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
