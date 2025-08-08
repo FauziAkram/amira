@@ -1514,8 +1514,15 @@ void MovePicker::score_all_moves() {
                 m.score = 900000;
             else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1])
                 m.score = 800000;
-            else
-                m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
+            else {
+                // Combine history with a simple PST delta to encourage moves to better squares
+                Piece p_type_moved = m_pos.piece_on_sq(m.from);
+                int pst_delta = 0;
+                if (p_type_moved != KING) { // PST delta is less meaningful for king moves in ordering
+                    pst_delta = pst_mg_all[p_type_moved][m.to] - pst_mg_all[p_type_moved][m.from];
+                }
+                m.score = move_history_score[m_pos.side_to_move][m.from][m.to] + pst_delta;
+            }
         }
     }
 }
@@ -2215,3 +2222,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
