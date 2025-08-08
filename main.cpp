@@ -1681,6 +1681,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
+    uint64_t opp_pieces = pos.color_bb[1 - pos.side_to_move];
+    uint64_t friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[pos.side_to_move];
 
     std::vector<Move> quiet_moves_for_history;
 
@@ -1688,6 +1690,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         bool legal;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
+
+        // NEW: Cache if the move is quiet using fast bitboard checks
+        bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
 
         legal_moves_played++;
         int score;
@@ -1711,8 +1716,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition)
             score = 0;
         else {
-            bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
-
             if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
 
@@ -1748,7 +1751,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (score > alpha) {
                 alpha = score;
                 if (score >= beta) {
-                    if (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
+                    if (is_quiet) {
                         // Killer move update
                         if (ply < MAX_PLY) {
                             if (!(current_move == killer_moves[ply][0])) {
@@ -2215,3 +2218,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
