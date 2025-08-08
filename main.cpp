@@ -254,7 +254,7 @@ void init_attack_tables() {
             ((b << 17) & ~0x0101010101010101ULL) | ((b << 15) & ~0x8080808080808080ULL) |
             ((b << 10) & ~0x0303030303030303ULL) | ((b << 6)  & ~0xC0C0C0C0C0C0C0C0ULL) |
             ((b >> 17) & ~0x8080808080808080ULL) | ((b >> 15) & ~0x0101010101010101ULL) |
-            ((b >> 10) & ~0xC0C0C0C0C0C0C0C0ULL) | ((b >> 6)  & ~0x0303030303030303ULL)
+            ((b >> 10) & ~0xC0C0C0C0C0C0C0C0ULL) | ((b >> 6)  & ~0x03030303030303ULL)
         );
 
         king_attacks_bb[sq] = north(b) | south(b) | east(b) | west(b) |
@@ -1242,6 +1242,7 @@ struct TTEntry {
     int score = 0;
     int depth = 0;
     int static_eval = 0;
+    uint16_t age = 0; // NEW: Age of the entry for replacement strategy
     TTBound bound = TT_NONE;
 };
 
@@ -1249,6 +1250,7 @@ std::vector<TTEntry> transposition_table;
 uint64_t tt_mask = 0;
 bool g_tt_is_initialized = false;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
+uint16_t g_tt_age = 0; // NEW: Global age counter, incremented each search
 
 void init_tt(size_t mb_size) {
     if (mb_size == 0) {
@@ -1305,25 +1307,32 @@ bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& mo
 void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const Move& best_move, int static_eval) {
     if (tt_mask == 0 || !g_tt_is_initialized) return;
     TTEntry& entry = transposition_table[hash & tt_mask];
+    uint64_t old_hash = entry.hash;
+
+    // Replacement strategy:
+    // We replace the entry if the new one is for a different position,
+    // or if the new one is not "worse" than the existing fresh one.
+    // "Worse" means same position, same search, but shallower depth.
+    if (old_hash == hash && entry.age == g_tt_age && entry.depth > depth) {
+        return;
+    }
 
     if (score > MATE_THRESHOLD) score += ply;
     else if (score < -MATE_THRESHOLD) score -= ply;
 
-    bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
-                          (depth > entry.depth) ||
-                          (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
-                          (depth == entry.depth && entry.bound == TT_NONE);
-
-    if (should_replace) {
-        entry.hash = hash;
-        entry.depth = depth;
-        entry.score = score;
-        entry.bound = bound;
-        entry.static_eval = static_eval;
-        if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER)
-             entry.best_move = best_move;
+    // Update best move only if the new move is not null, or if we are overwriting a different position.
+    if (!best_move.is_null() || old_hash != hash) {
+        entry.best_move = best_move;
     }
+    
+    entry.hash = hash;
+    entry.depth = depth;
+    entry.score = score;
+    entry.bound = bound;
+    entry.static_eval = static_eval;
+    entry.age = g_tt_age;
 }
+
 
 // --- Search ---
 std::chrono::steady_clock::time_point search_start_timepoint;
@@ -1461,7 +1470,7 @@ public:
              m_move_count = generate_moves(m_pos, m_moves, true);
              for(int i=0; i<m_move_count; ++i) {
                 Piece captured = m_pos.piece_on_sq(m_moves[i].to);
-                if (captured == NO_PIECE) captured = PAWN;
+                if (captured == NO_PIECE) captured = PAWN; // En Passant
                 m_moves[i].score = (see_piece_values[captured] * 100) - m_pos.piece_on_sq(m_moves[i].from);
              }
         } else {
@@ -1497,16 +1506,18 @@ void MovePicker::score_all_moves() {
             continue;
         }
 
-        bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
+        Piece p_type_moved = m_pos.piece_on_sq(m.from);
+        bool is_ep_capture = (p_type_moved == PAWN && m.to == m_pos.ep_square);
+        bool is_capture = get_bit(opp_pieces, m.to) || is_ep_capture;
         
         if (is_capture || m.promotion != NO_PIECE) {
-             if (see(m_pos, m) >= 0) {
-                Piece moved = m_pos.piece_on_sq(m.from);
-                Piece captured = m_pos.piece_on_sq(m.to);
-                if (captured == NO_PIECE) captured = PAWN; // En-passant case
-                m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
-             } else
-                 m.score = -1000000; // Bad capture
+            // Use simple MVV-LVA for scoring. A full SEE check is too expensive for ordering all captures.
+            // The search itself will prune bad captures effectively.
+            Piece p_type_captured = is_ep_capture ? PAWN : m_pos.piece_on_sq(m.to);
+            
+            int promotion_bonus = m.promotion != NO_PIECE ? see_piece_values[m.promotion] * 100 : 0;
+            m.score = 2000000 + promotion_bonus + (see_piece_values[p_type_captured] * 100) - see_piece_values[p_type_moved];
+
         } else { // Quiet moves
             if (!refutation.is_null() && m == refutation)
                 m.score = 1000000;
@@ -1514,11 +1525,18 @@ void MovePicker::score_all_moves() {
                 m.score = 900000;
             else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1])
                 m.score = 800000;
-            else
-                m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
+            else {
+                // Combine history with a simple PST delta to encourage moves to better squares
+                int pst_delta = 0;
+                if (p_type_moved != KING) { // PST delta is less meaningful for king moves in ordering
+                    pst_delta = pst_mg_all[p_type_moved][m.to] - pst_mg_all[p_type_moved][m.from];
+                }
+                m.score = move_history_score[m_pos.side_to_move][m.from][m.to] + pst_delta;
+            }
         }
     }
 }
+
 
 Move MovePicker::next_move() {
     if (m_current_idx >= m_move_count)
@@ -1683,6 +1701,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     int best_score = -INF_SCORE;
 
     std::vector<Move> quiet_moves_for_history;
+    uint64_t opp_pieces = pos.color_bb[1 - pos.side_to_move];
+    uint64_t friendly_pawns = pos.piece_bb[PAWN] & pos.color_bb[pos.side_to_move];
 
     while(!(current_move = picker.next_move()).is_null()) {
         bool legal;
@@ -1711,7 +1731,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         if (is_repetition)
             score = 0;
         else {
-            bool is_quiet = (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE);
+            // NEW: Cache if the move is quiet using fast bitboard checks
+            bool is_ep_capture = (pos.ep_square == current_move.to) && get_bit(friendly_pawns, current_move.from);
+            bool is_capture = get_bit(opp_pieces, current_move.to) || is_ep_capture;
+            bool is_quiet = !is_capture && current_move.promotion == NO_PIECE;
 
             if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
@@ -1748,7 +1771,11 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (score > alpha) {
                 alpha = score;
                 if (score >= beta) {
-                    if (pos.piece_on_sq(current_move.to) == NO_PIECE && current_move.promotion == NO_PIECE) {
+                    // NEW: use cached is_quiet boolean
+                    bool is_ep_capture = (pos.ep_square == current_move.to) && get_bit(friendly_pawns, current_move.from);
+                    bool is_capture = get_bit(opp_pieces, current_move.to) || is_ep_capture;
+                    bool is_quiet = !is_capture && current_move.promotion == NO_PIECE;
+                    if (is_quiet) {
                         // Killer move update
                         if (ply < MAX_PLY) {
                             if (!(current_move == killer_moves[ply][0])) {
@@ -2049,6 +2076,7 @@ void uci_loop() {
 
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
+            g_tt_age++; // NEW: Increment TT age for this new search
 
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
