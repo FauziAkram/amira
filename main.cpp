@@ -1242,6 +1242,7 @@ struct TTEntry {
     int score = 0;
     int depth = 0;
     int static_eval = 0;
+    uint16_t age = 0;
     TTBound bound = TT_NONE;
 };
 
@@ -1284,6 +1285,7 @@ void clear_tt() {
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt, int& eval_from_tt) {
     if (tt_mask == 0 || !g_tt_is_initialized) return false;
     TTEntry& entry = transposition_table[hash & tt_mask];
+    uint64_t old_hash = entry.hash;
 
     if (entry.hash == hash && entry.bound != TT_NONE) {
         move_from_tt = entry.best_move;
@@ -1309,19 +1311,22 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
     if (score > MATE_THRESHOLD) score += ply;
     else if (score < -MATE_THRESHOLD) score -= ply;
 
-    bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
-                          (depth > entry.depth) ||
-                          (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
-                          (depth == entry.depth && entry.bound == TT_NONE);
+    // Replacement strategy:
+    // We replace the entry if the new one is for a different position,
+    // or if the new one is not "worse" than the existing fresh one.
+    // "Worse" means same position, same search, but shallower depth.
+    if (old_hash == hash && entry.age == g_tt_age && entry.depth > depth)
+        return;
 
-    if (should_replace) {
-        entry.hash = hash;
-        entry.depth = depth;
-        entry.score = score;
-        entry.bound = bound;
-        entry.static_eval = static_eval;
-        if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER)
-             entry.best_move = best_move;
+    // Update best move only if the new move is not null, or if we are overwriting a different position.
+    if (!best_move.is_null() || old_hash != hash)
+        entry.best_move = best_move;
+    entry.hash = hash;
+    entry.depth = depth;
+    entry.score = score;
+    entry.bound = bound;
+    entry.static_eval = static_eval;
+    entry.age = g_tt_age;
     }
 }
 
@@ -2049,6 +2054,7 @@ void uci_loop() {
 
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
+            g_tt_age++;
 
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
@@ -2215,3 +2221,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
