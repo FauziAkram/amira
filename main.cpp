@@ -1940,7 +1940,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.5\n";
+            std::cout << "id name Amira 1.51\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -2234,3 +2234,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
