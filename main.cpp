@@ -777,7 +777,7 @@ const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
 const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
-const PhaseScore BACKWARD_PAWN_PENALTY
+const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
 const PhaseScore KNIGHT_MOBILITY_BONUS         = {1, 2};
 const PhaseScore BISHOP_MOBILITY_BONUS         = {2, 3};
 const PhaseScore ROOK_MOBILITY_BONUS           = {2, 4};
@@ -2220,3 +2220,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
