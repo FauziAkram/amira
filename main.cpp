@@ -461,7 +461,6 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     uint64_t opp_pieces = pos.color_bb[enemy_color];
     uint64_t occupied = my_pieces | opp_pieces;
     uint64_t empty_squares = ~occupied;
-
     uint64_t pawns = pos.piece_bb[PAWN] & my_pieces;
     while (pawns) {
         int from = lsb_index(pawns);
@@ -561,7 +560,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     Position next_pos = pos;
     int stm = pos.side_to_move;
     int opp = 1 - stm;
-
     uint64_t from_bb = set_bit(move.from);
     uint64_t to_bb = set_bit(move.to);
     Piece piece_moved = pos.piece_on_sq(move.from);
@@ -573,10 +571,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     next_pos.zobrist_hash = pos.zobrist_hash;
     next_pos.pawn_zobrist_key = pos.pawn_zobrist_key;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
-
     next_pos.piece_bb[piece_moved] &= ~from_bb;
     next_pos.color_bb[stm] &= ~from_bb;
-
     next_pos.halfmove_clock++;
 
     if (piece_captured != NO_PIECE) {
@@ -781,7 +777,7 @@ const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
 const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
-const PhaseScore HINDERED_PAWN_PENALTY         = {-9, -14};
+const PhaseScore BACKWARD_PAWN_PENALTY
 const PhaseScore KNIGHT_MOBILITY_BONUS         = {1, 2};
 const PhaseScore BISHOP_MOBILITY_BONUS         = {2, 3};
 const PhaseScore ROOK_MOBILITY_BONUS           = {2, 4};
@@ -939,7 +935,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
             int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
             if (get_bit(enemy_pawn_attacks, push_sq)) {
-                pawn_score += HINDERED_PAWN_PENALTY;
+                pawn_score += BACKWARD_PAWN_PENALTY;
             }
         }
 
@@ -1027,7 +1023,6 @@ int evaluate(Position& pos) {
         evaluate_pawn_structure_for_color(pos, BLACK, black_pawn_score, black_passed_pawns);
         
         pawn_score = white_pawn_score - black_pawn_score;
-        
         pawn_entry.key = pos.pawn_zobrist_key;
         pawn_entry.score = pawn_score;
         pawn_entry.white_passed_pawns = white_passed_pawns;
@@ -1042,9 +1037,7 @@ int evaluate(Position& pos) {
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         Color enemy_color = (Color)(1-c_idx);
-        
         PhaseScore current_color_score;
-        
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
         uint64_t attackable_squares = ~friendly_pieces;
@@ -1162,7 +1155,6 @@ int evaluate(Position& pos) {
 
         uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
         uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
-
         uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
         int pressure_count = pop_count(minor_attacks & enemy_rooks_and_queens);
         if (pressure_count > 0) {
@@ -1417,7 +1409,6 @@ int see(const Position& pos, const Move& move) {
     int d = 0;
     uint64_t from_bb = set_bit(move.from);
     uint64_t occupied = pos.get_occupied_bb();
-
     Color stm = pos.color_on_sq(move.from);
     Piece captured_piece_type = pos.piece_on_sq(move.to);
     if(move.promotion != NO_PIECE)
@@ -1495,7 +1486,6 @@ private:
     Move m_tt_move;
     Move m_prev_move;
     bool m_quiescence_mode;
-
     Move m_moves[256];
     int m_move_count;
     int m_current_idx;
@@ -1693,7 +1683,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     MovePicker picker(pos, ply, tt_move, prev_move);
     Move current_move;
-    
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
     int best_score = -INF_SCORE;
@@ -1712,7 +1701,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         legal_moves_played++;
         int score;
-
         bool is_repetition = false;
         for (int k = ply - 1; k >= 0; k -= 2) {
             if (search_path_hashes[k] == next_pos.zobrist_hash) {
@@ -2111,7 +2099,6 @@ void uci_loop() {
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
-
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
             int aspiration_window_delta = 25;
@@ -2230,8 +2217,6 @@ int main(int argc, char* argv[]) {
     init_eval_masks();
     init_pawn_cache();
     reset_search_heuristics();
-
     uci_loop();
     return 0;
 }
-
