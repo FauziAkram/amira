@@ -794,10 +794,6 @@ const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
 const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
 const PhaseScore ROOK_ON_SEVENTH_BONUS         = {12, 39};
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
-
-// --- NEW: Threat Evaluation Constants ---
-// Threats by minor/rook pieces against various pieces
-// Index corresponds to Amira's Piece enum
 const PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
@@ -1018,13 +1014,12 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     return std::min(256, 192 + num_stronger_pawns * 20);
 }
 
-// --- NEW: Threat Evaluation ---
+// --- Threat Evaluation ---
 // This function calculates bonuses for various types of threats a side can create.
 // It requires fully populated attack maps for both sides to work correctly.
 PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint64_t attackedBy[2][7], const uint64_t attackedBy2[2]) {
     PhaseScore score = {};
     const Color them = (Color)(1 - us);
-
     uint64_t non_pawn_enemies = pos.color_bb[them] & ~pos.piece_bb[PAWN];
     uint64_t strongly_protected_by_them = attackedBy[them][PAWN] | (attackedBy2[them] & ~attackedBy2[us]);
     uint64_t weak_enemy_pieces = pos.color_bb[them] & ~strongly_protected_by_them & attackedBy[us][6]; // 6 is ALL_PIECES
@@ -2308,4 +2303,5 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
 
