@@ -1087,7 +1087,6 @@ PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint6
     return score;
 }
 
-
 int evaluate(Position& pos) {
     if (is_insufficient_material(pos)) return 0; 
 
@@ -1159,8 +1158,7 @@ int evaluate(Position& pos) {
         }
     }
     // --- End of Attack Information Calculation ---
-
-
+    
     // --- Stage 2: Score pieces, mobility, king safety, and threats ---
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
@@ -1257,7 +1255,7 @@ int evaluate(Position& pos) {
             current_color_score += BISHOP_PAIR_BONUS; 
         }
 
-        // --- NEW: Add threat score ---
+        // --- Add threat score ---
         current_color_score += evaluate_threats_for_color(pos, current_eval_color, attackedBy, attackedBy2);
 
         // --- King Safety and Shelter Evaluation ---
@@ -2310,3 +2308,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
