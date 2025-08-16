@@ -49,6 +49,11 @@ struct PhaseScore {
         eg *= scalar;
         return *this;
     }
+    PhaseScore operator*(int scalar) const {
+        PhaseScore result = *this;
+        result *= scalar;
+        return result;
+    }
 };
 
 
@@ -785,13 +790,23 @@ const PhaseScore QUEEN_MOBILITY_BONUS          = {1, 2};
 const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
 const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
 const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-const PhaseScore MINOR_ON_HEAVY_PRESSURE       = {22, 17};
-const PhaseScore ROOK_ON_MINOR_PRESSURE        = {16, 11};
 const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
 const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
 const PhaseScore ROOK_ON_SEVENTH_BONUS         = {12, 39};
-
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
+const PhaseScore THREAT_BY_MINOR[7] = {
+    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
+};
+const PhaseScore THREAT_BY_ROOK[7] = {
+    {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
+};
+const PhaseScore THREAT_BY_KING = {6, 21};
+const PhaseScore HANGING_PIECE_BONUS = {18, 10};
+const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
+const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
+const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
+const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+
 
 // --- Evaluation Constants for King Safety ---
 // Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
@@ -999,6 +1014,74 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     return std::min(256, 192 + num_stronger_pawns * 20);
 }
 
+// --- Threat Evaluation ---
+// This function calculates bonuses for various types of threats a side can create.
+// It requires fully populated attack maps for both sides to work correctly.
+PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint64_t attackedBy[2][7], const uint64_t attackedBy2[2]) {
+    PhaseScore score = {};
+    const Color them = (Color)(1 - us);
+    uint64_t non_pawn_enemies = pos.color_bb[them] & ~pos.piece_bb[PAWN];
+    uint64_t strongly_protected_by_them = attackedBy[them][PAWN] | (attackedBy2[them] & ~attackedBy2[us]);
+    uint64_t weak_enemy_pieces = pos.color_bb[them] & ~strongly_protected_by_them & attackedBy[us][6]; // 6 is ALL_PIECES
+    uint64_t defended_enemy_pieces = non_pawn_enemies & strongly_protected_by_them;
+    uint64_t all_targets = weak_enemy_pieces | defended_enemy_pieces;
+
+    if (!all_targets) return score; // Early exit if no pieces are targeted
+
+    // Threats by minor pieces (Knights and Bishops)
+    uint64_t b = all_targets & (attackedBy[us][KNIGHT] | attackedBy[us][BISHOP]);
+    while(b) {
+        int sq = lsb_index(b);
+        b &= b - 1;
+        score += THREAT_BY_MINOR[pos.piece_on_sq(sq)];
+    }
+
+    // Threats by rooks (on weak pieces only)
+    b = weak_enemy_pieces & attackedBy[us][ROOK];
+    while(b) {
+        int sq = lsb_index(b);
+        b &= b - 1;
+        score += THREAT_BY_ROOK[pos.piece_on_sq(sq)];
+    }
+
+    // Threats by the king
+    if (weak_enemy_pieces & attackedBy[us][KING]) {
+        score += THREAT_BY_KING;
+    }
+
+    // Bonus for attacking hanging pieces (un- or under-defended)
+    uint64_t hanging_targets = ~attackedBy[them][6] | (non_pawn_enemies & attackedBy2[us]);
+    score += HANGING_PIECE_BONUS * pop_count(weak_enemy_pieces & hanging_targets);
+    
+    // Bonus for attacking pieces weakly defended by the enemy queen
+    score += WEAK_QUEEN_DEFENSE_BONUS * pop_count(weak_enemy_pieces & attackedBy[them][QUEEN]);
+
+    // Bonus for restricting enemy piece movement by attacking their safe squares
+    uint64_t restricted_squares = attackedBy[them][6] & ~strongly_protected_by_them & attackedBy[us][6];
+    score += RESTRICTED_PIECE_BONUS * pop_count(restricted_squares);
+
+    // Bonus for creating threats with safe pawns
+    uint64_t safe_squares_for_us = ~attackedBy[them][6] | attackedBy[us][6];
+    uint64_t safe_pawns = pos.piece_bb[PAWN] & pos.color_bb[us] & safe_squares_for_us;
+    uint64_t pawn_threats = (us == WHITE) ? (ne(safe_pawns) | nw(safe_pawns)) : (se(safe_pawns) | sw(safe_pawns));
+    score += SAFE_PAWN_ATTACK_BONUS * pop_count(pawn_threats & non_pawn_enemies);
+
+    // Bonus for pawn push threats
+    uint64_t push_targets;
+    if (us == WHITE) {
+        push_targets = north(pos.piece_bb[PAWN] & pos.color_bb[WHITE]) & ~pos.get_occupied_bb();
+        push_targets |= north(push_targets & rank_bb_mask[2]) & ~pos.get_occupied_bb(); // Rank 3
+    } else {
+        push_targets = south(pos.piece_bb[PAWN] & pos.color_bb[BLACK]) & ~pos.get_occupied_bb();
+        push_targets |= south(push_targets & rank_bb_mask[5]) & ~pos.get_occupied_bb(); // Rank 6
+    }
+    push_targets &= ~attackedBy[them][PAWN] & safe_squares_for_us;
+    uint64_t push_threats = (us == WHITE) ? (ne(push_targets) | nw(push_targets)) : (se(push_targets) | sw(push_targets));
+    score += PAWN_PUSH_THREAT_BONUS * pop_count(push_threats & non_pawn_enemies);
+
+    return score;
+}
+
 int evaluate(Position& pos) {
     if (is_insufficient_material(pos)) return 0; 
 
@@ -1012,12 +1095,10 @@ int evaluate(Position& pos) {
 
     PawnCacheEntry& pawn_entry = pawn_evaluation_cache[pos.pawn_zobrist_key & pawn_cache_mask];
     if (pawn_entry.key == pos.pawn_zobrist_key) {
-        // Cache hit
         pawn_score = pawn_entry.score;
         white_passed_pawns = pawn_entry.white_passed_pawns;
         black_passed_pawns = pawn_entry.black_passed_pawns;
     } else {
-        // Cache miss: evaluate and store
         PhaseScore white_pawn_score, black_pawn_score;
         evaluate_pawn_structure_for_color(pos, WHITE, white_pawn_score, white_passed_pawns);
         evaluate_pawn_structure_for_color(pos, BLACK, black_pawn_score, black_passed_pawns);
@@ -1031,17 +1112,56 @@ int evaluate(Position& pos) {
     final_score += pawn_score;
     // --- End of Pawn Evaluation ---
 
-    // Attack bitboards for threat evaluation
-    uint64_t piece_attacks_bb[2][6] = {{0}}; // [color][piece_type]
+    // --- Stage 1: Pre-calculate all attack information ---
+    uint64_t attackedBy[2][7] = {{0}}; // [color][piece_type], 6 for ALL_PIECES
+    uint64_t attackedBy2[2] = {0}; // Squares attacked by 2 or more pieces
 
+    uint64_t occupied = pos.get_occupied_bb();
+
+    for (int c_idx = 0; c_idx < 2; ++c_idx) {
+        Color c = (Color)c_idx;
+        // Pawns and King attacks first
+        uint64_t temp_pawns = pos.piece_bb[PAWN] & pos.color_bb[c];
+        while (temp_pawns) {
+            int sq = lsb_index(temp_pawns);
+            temp_pawns &= temp_pawns - 1;
+            attackedBy[c][PAWN] |= pawn_attacks_bb[c][sq];
+        }
+        int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[c]);
+        if (king_sq != -1) attackedBy[c][KING] = king_attacks_bb[king_sq];
+
+        attackedBy[c][6] = attackedBy[c][PAWN] | attackedBy[c][KING];
+        attackedBy2[c] = attackedBy[c][PAWN] & attackedBy[c][KING];
+
+        // Sliders and Knights
+        Piece piece_types[] = {KNIGHT, BISHOP, ROOK, QUEEN};
+        for (Piece p_type : piece_types) {
+            uint64_t pieces = pos.piece_bb[p_type] & pos.color_bb[c];
+            while (pieces) {
+                int sq = lsb_index(pieces);
+                pieces &= pieces - 1;
+                uint64_t attacks = 0;
+                if (p_type == KNIGHT) attacks = knight_attacks_bb[sq];
+                else if (p_type == BISHOP) attacks = get_bishop_attacks(sq, occupied);
+                else if (p_type == ROOK) attacks = get_rook_attacks(sq, occupied);
+                else if (p_type == QUEEN) attacks = get_queen_attacks(sq, occupied);
+                
+                attackedBy[c][p_type] |= attacks;
+                attackedBy2[c] |= attackedBy[c][6] & attacks;
+                attackedBy[c][6] |= attacks;
+            }
+        }
+    }
+    
+    // --- Stage 2: Score pieces, mobility, king safety, and threats ---
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         Color enemy_color = (Color)(1-c_idx);
         PhaseScore current_color_score;
+        
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
         uint64_t attackable_squares = ~friendly_pieces;
-        uint64_t occupied = pos.get_occupied_bb();
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
         
@@ -1067,7 +1187,25 @@ int evaluate(Position& pos) {
                             current_color_score.eg += dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
                         }
                     }
-                } else if ((Piece)p == ROOK) {
+                } else if ((Piece)p != KING) { // Mobility for non-king pieces
+                    uint64_t mobility_attacks = 0;
+                    if ((Piece)p == KNIGHT) mobility_attacks = knight_attacks_bb[sq];
+                    else if ((Piece)p == BISHOP) mobility_attacks = get_bishop_attacks(sq, occupied);
+                    else if ((Piece)p == ROOK) mobility_attacks = get_rook_attacks(sq, occupied);
+                    else if ((Piece)p == QUEEN) mobility_attacks = get_queen_attacks(sq, occupied);
+                    
+                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    PhaseScore mobility_score = {};
+                    if ((Piece)p == KNIGHT) mobility_score = KNIGHT_MOBILITY_BONUS;
+                    else if ((Piece)p == BISHOP) mobility_score = BISHOP_MOBILITY_BONUS;
+                    else if ((Piece)p == ROOK) mobility_score = ROOK_MOBILITY_BONUS;
+                    else if ((Piece)p == QUEEN) mobility_score = QUEEN_MOBILITY_BONUS;
+                    
+                    mobility_score *= mobility_count;
+                    current_color_score += mobility_score;
+                }
+
+                if ((Piece)p == ROOK) {
                     int f = sq % 8;
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
@@ -1075,77 +1213,35 @@ int evaluate(Position& pos) {
                         if (!enemy_pawn_on_file) current_color_score += ROOK_ON_OPEN_FILE; 
                         else current_color_score += ROOK_ON_SEMI_OPEN_FILE;
                     }
-                    
                     int relative_rank = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-                    if (relative_rank == 6) {
-                        current_color_score += ROOK_ON_SEVENTH_BONUS;
-                    }
-
-                    uint64_t mobility_attacks = get_rook_attacks(sq, occupied);
-                    piece_attacks_bb[c_idx][ROOK] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    PhaseScore mobility_score = ROOK_MOBILITY_BONUS;
-                    mobility_score *= mobility_count;
-                    current_color_score += mobility_score;
+                    if (relative_rank == 6) current_color_score += ROOK_ON_SEVENTH_BONUS;
                 }
-                else if ((Piece)p == KNIGHT) {
-                    uint64_t mobility_attacks = knight_attacks_bb[sq];
-                    piece_attacks_bb[c_idx][KNIGHT] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    PhaseScore mobility_score = KNIGHT_MOBILITY_BONUS;
-                    mobility_score *= mobility_count;
-                    current_color_score += mobility_score;
-
+                else if ((Piece)p == KNIGHT || (Piece)p == BISHOP) {
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
                         bool is_supported_by_pawn = get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns);
                         bool is_defended_by_enemy_pawns = (pawn_attack_shield_mask[current_eval_color][sq] & all_enemy_pawns) != 0;
                         if (is_supported_by_pawn && !is_defended_by_enemy_pawns) {
-                            current_color_score += KNIGHT_OUTPOST_BONUS;
+                            current_color_score += ((Piece)p == KNIGHT ? KNIGHT_OUTPOST_BONUS : BISHOP_OUTPOST_BONUS);
                         }
                     }
-
-                    uint64_t potential_outpost_moves = mobility_attacks & ~occupied;
-                    while(potential_outpost_moves) {
-                        int to_sq = lsb_index(potential_outpost_moves);
-                        potential_outpost_moves &= potential_outpost_moves-1;
-                        int to_rank = to_sq/8;
-                        int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
-                        if (to_relative_rank >= 3 && to_relative_rank <=5) {
-                            if (get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && 
-                                (pawn_attack_shield_mask[current_eval_color][to_sq] & all_enemy_pawns) == 0) {
-                                current_color_score += POTENTIAL_DOMINANCE_BONUS;
-                                break;
+                    if ((Piece)p == KNIGHT) {
+                        uint64_t potential_outpost_moves = knight_attacks_bb[sq] & ~occupied;
+                        while(potential_outpost_moves) {
+                            int to_sq = lsb_index(potential_outpost_moves);
+                            potential_outpost_moves &= potential_outpost_moves-1;
+                            int to_rank = to_sq/8;
+                            int to_relative_rank = (current_eval_color == WHITE) ? to_rank : 7-to_rank;
+                            if (to_relative_rank >= 3 && to_relative_rank <=5) {
+                                if (get_bit(pawn_attacks_bb[enemy_color][to_sq], all_friendly_pawns) && 
+                                    (pawn_attack_shield_mask[current_eval_color][to_sq] & all_enemy_pawns) == 0) {
+                                    current_color_score += POTENTIAL_DOMINANCE_BONUS;
+                                    break;
+                                }
                             }
                         }
                     }
-                } else if ((Piece)p == BISHOP) {
-                    uint64_t mobility_attacks = get_bishop_attacks(sq, occupied);
-                    piece_attacks_bb[c_idx][BISHOP] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    PhaseScore mobility_score = BISHOP_MOBILITY_BONUS;
-                    mobility_score *= mobility_count;
-                    current_color_score += mobility_score;
-
-                    int rank = sq / 8;
-                    int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
-                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) {
-                        bool is_supported_by_pawn = get_bit(pawn_attacks_bb[enemy_color][sq], all_friendly_pawns);
-                        bool is_defended_by_enemy_pawns = (pawn_attack_shield_mask[current_eval_color][sq] & all_enemy_pawns) != 0;
-                        if (is_supported_by_pawn && !is_defended_by_enemy_pawns) {
-                           current_color_score += BISHOP_OUTPOST_BONUS;
-                        }
-                    }
-                } else if ((Piece)p == QUEEN) {
-                    uint64_t mobility_attacks = get_queen_attacks(sq, occupied);
-                    piece_attacks_bb[c_idx][QUEEN] |= mobility_attacks;
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
-                    PhaseScore mobility_score = QUEEN_MOBILITY_BONUS;
-                    mobility_score *= mobility_count;
-                    current_color_score += mobility_score;
-                } else if ((Piece)p == KING) {
-                    piece_attacks_bb[c_idx][KING] |= king_attacks_bb[sq];
                 }
             }
         }
@@ -1153,22 +1249,8 @@ int evaluate(Position& pos) {
             current_color_score += BISHOP_PAIR_BONUS; 
         }
 
-        uint64_t enemy_rooks_and_queens = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & enemy_pieces;
-        uint64_t enemy_knights_and_bishops = (pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & enemy_pieces;
-        uint64_t minor_attacks = piece_attacks_bb[c_idx][KNIGHT] | piece_attacks_bb[c_idx][BISHOP];
-        int pressure_count = pop_count(minor_attacks & enemy_rooks_and_queens);
-        if (pressure_count > 0) {
-            PhaseScore pressure_score = MINOR_ON_HEAVY_PRESSURE;
-            pressure_score *= pressure_count;
-            current_color_score += pressure_score;
-        }
-
-        pressure_count = pop_count(piece_attacks_bb[c_idx][ROOK] & enemy_knights_and_bishops);
-        if (pressure_count > 0) {
-            PhaseScore pressure_score = ROOK_ON_MINOR_PRESSURE;
-            pressure_score *= pressure_count;
-            current_color_score += pressure_score;
-        }
+        // --- Add threat score ---
+        current_color_score += evaluate_threats_for_color(pos, current_eval_color, attackedBy, attackedBy2);
 
         // --- King Safety and Shelter Evaluation ---
         int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
@@ -1928,7 +2010,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.51\n";
+            std::cout << "id name Amira 1.52\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
@@ -2220,4 +2302,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
