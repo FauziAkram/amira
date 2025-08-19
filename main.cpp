@@ -783,10 +783,10 @@ const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
 const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
 const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-const PhaseScore KNIGHT_MOBILITY_BONUS         = {1, 2};
-const PhaseScore BISHOP_MOBILITY_BONUS         = {2, 3};
-const PhaseScore ROOK_MOBILITY_BONUS           = {2, 4};
-const PhaseScore QUEEN_MOBILITY_BONUS          = {1, 2};
+const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
+const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
+const PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
+const PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
 const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
 const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
 const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
@@ -1161,7 +1161,9 @@ int evaluate(Position& pos) {
         
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
         uint64_t enemy_pieces = pos.color_bb[enemy_color];
-        uint64_t attackable_squares = ~friendly_pieces;
+        // Calculate the safe area for mobility, excluding squares attacked by enemy pawns.
+        uint64_t enemy_pawn_attacks = attackedBy[enemy_color][PAWN];
+        uint64_t safe_mobility_area = ~(friendly_pieces | enemy_pawn_attacks);
         uint64_t all_friendly_pawns = pos.piece_bb[PAWN] & friendly_pieces;
         uint64_t all_enemy_pawns = pos.piece_bb[PAWN] & enemy_pieces;
         
@@ -1194,7 +1196,7 @@ int evaluate(Position& pos) {
                     else if ((Piece)p == ROOK) mobility_attacks = get_rook_attacks(sq, occupied);
                     else if ((Piece)p == QUEEN) mobility_attacks = get_queen_attacks(sq, occupied);
                     
-                    int mobility_count = pop_count(mobility_attacks & attackable_squares);
+                    int mobility_count = pop_count(mobility_attacks & safe_mobility_area);
                     PhaseScore mobility_score = {};
                     if ((Piece)p == KNIGHT) mobility_score = KNIGHT_MOBILITY_BONUS;
                     else if ((Piece)p == BISHOP) mobility_score = BISHOP_MOBILITY_BONUS;
@@ -2010,7 +2012,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.52\n";
+            std::cout << "id name Amira 1.53\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
