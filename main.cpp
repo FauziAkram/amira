@@ -1667,7 +1667,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 }
 
 // Search function signature and repetition logic
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move) {
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move, bool prev_move_was_capture) {
     search_path_hashes[ply] = pos.zobrist_hash;
 
     nodes_searched++;
@@ -1726,7 +1726,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1;
 
             int R_nmp = (depth > 6) ? 3 : 2;
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
+            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE, false);
             
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -1751,9 +1751,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             Position next_pos = make_move(pos, tactical_move, is_legal);
             if (!is_legal) continue;
 
-            // Search with a reduced depth and the raised beta
+            // Search with a reduced depth and the raised beta. A move from tactical picker is always a capture/promo.
             int tactical_score = -search(next_pos, depth - 1 - TACTICAL_LOOKAHEAD_REDUCTION,
-                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move);
+                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move, true);
 
             if (stop_search_flag) return 0;
 
@@ -1780,11 +1780,18 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
 
-        // Cache if the move is quiet using fast bitboard checks
-        bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
+        bool is_capture = get_bit(opp_pieces, current_move.to) || (pos.piece_on_sq(current_move.from) == PAWN && current_move.to == pos.ep_square);
+        bool is_quiet = !is_capture && current_move.promotion == NO_PIECE;
 
         legal_moves_played++;
         int score;
+        int extension = 0;
+
+        // --- Recapture Extension ---
+        if (is_pv_node && ply > 0 && prev_move_was_capture && is_capture && current_move.to == prev_move.to) {
+            extension = 1;
+        }
+
         bool is_repetition = false;
         for (int k = ply - 1; k >= 0; k -= 2) {
             if (search_path_hashes[k] == next_pos.zobrist_hash) {
@@ -1808,7 +1815,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 quiet_moves_for_history.push_back(current_move);
 
             if (legal_moves_played == 1) // PVS: First move gets full window search
-                score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
+                score = -search(next_pos, depth - 1 + extension, -beta, -alpha, ply + 1, true, true, current_move, is_capture);
             else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
@@ -1822,12 +1829,12 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 }
                 R_lmr = std::max(0, R_lmr);
 
-                score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
+                score = -search(next_pos, depth - 1 - R_lmr + extension, -alpha - 1, -alpha, ply + 1, false, true, current_move, is_capture);
                 
                 if (score > alpha && R_lmr > 0) // Re-search if reduction was too aggressive
-                     score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_move);
+                     score = -search(next_pos, depth - 1 + extension, -alpha - 1, -alpha, ply + 1, false, true, current_move, is_capture);
                 if (score > alpha && score < beta)
-                     score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_move);
+                     score = -search(next_pos, depth - 1 + extension, -beta, -alpha, ply + 1, false, true, current_move, is_capture);
             }
         }
 
@@ -2190,13 +2197,13 @@ void uci_loop() {
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
                 if (depth <= 1)
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, uci_last_root_move);
+                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, NULL_MOVE, false);
                 else {
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move);
+                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, NULL_MOVE, false);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                         aspiration_alpha = -INF_SCORE;
                         aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move);
+                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, NULL_MOVE, false);
                     }
                 }
 
