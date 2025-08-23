@@ -770,6 +770,7 @@ uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
+constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
 const PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
@@ -806,6 +807,12 @@ const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
 const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
 const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
 const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+
+// --- NEW EVALUATION CONSTANTS ---
+const PhaseScore BLOCKED_BISHOP_PENALTY     = {-4, -8};
+const PhaseScore ADVANCED_PAWN_THREAT_PENALTY = {-6, -11};
+const PhaseScore KNIGHTS_IN_CROWD_BONUS     = {1, 1};
+const PhaseScore ROOKS_IN_CROWD_PENALTY     = {1, 0};
 
 
 // --- Evaluation Constants for King Safety ---
@@ -987,8 +994,8 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     if (white_bishops == 1 && black_bishops == 1) {
         uint64_t w_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[WHITE];
         uint64_t b_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[BLACK];
-        bool w_b_is_light = ( (set_bit(lsb_index(w_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
-        bool b_b_is_light = ( (set_bit(lsb_index(b_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
+        bool w_b_is_light = get_bit(LIGHT_SQUARES, lsb_index(w_b_bb));
+        bool b_b_is_light = get_bit(LIGHT_SQUARES, lsb_index(b_b_bb));
 
         if (w_b_is_light != b_b_is_light) {
             // Significant draw factor for OCB endgames
@@ -1207,7 +1214,15 @@ int evaluate(Position& pos) {
                     current_color_score += mobility_score;
                 }
 
-                if ((Piece)p == ROOK) {
+                if ((Piece)p == BISHOP) {
+                    // Penalize bishops blocked by friendly pawns
+                    uint64_t blocked_friendly_pawns = (current_eval_color == WHITE) ? south(all_enemy_pawns) & all_friendly_pawns : north(all_enemy_pawns) & all_friendly_pawns;
+                    uint64_t bishop_color_squares = get_bit(LIGHT_SQUARES, sq) ? LIGHT_SQUARES : ~LIGHT_SQUARES;
+                    int rammed_pawn_count = pop_count(blocked_friendly_pawns & bishop_color_squares);
+                    current_color_score += BLOCKED_BISHOP_PENALTY * rammed_pawn_count;
+                }
+
+                else if ((Piece)p == ROOK) {
                     int f = sq % 8;
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
                     bool enemy_pawn_on_file = (file_bb_mask[f] & all_enemy_pawns) != 0;
@@ -1284,6 +1299,17 @@ int evaluate(Position& pos) {
             int home_rank = (current_eval_color == WHITE) ? 0 : 7;
             if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
                 current_color_score.mg += shelter_score;
+            
+            // Pawn Storm Threat Evaluation
+            uint64_t storming_pawns = all_enemy_pawns & (adjacent_files_mask[king_file] | file_bb_mask[king_file]);
+            while (storming_pawns) {
+                int pawn_sq = lsb_index(storming_pawns);
+                storming_pawns &= storming_pawns - 1;
+                int relative_rank = (enemy_color == WHITE) ? (pawn_sq / 8) : (7 - (pawn_sq / 8));
+                if (relative_rank >= 4) { // Pawns on 5th rank or further are a threat
+                    current_color_score += ADVANCED_PAWN_THREAT_PENALTY;
+                }
+            }
 
             int king_danger_value = 0;
             auto calculate_tropism = [&](int p_sq) {
@@ -1309,6 +1335,19 @@ int evaluate(Position& pos) {
         else
             final_score -= current_color_score;
     }
+
+    // --- Positional Theme Adjustments based on pawn structure ---
+    int total_pawns = pop_count(pos.piece_bb[PAWN]);
+    int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
+    int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
+    int white_rooks = pop_count(pos.piece_bb[ROOK] & pos.color_bb[WHITE]);
+    int black_rooks = pop_count(pos.piece_bb[ROOK] & pos.color_bb[BLACK]);
+
+    // Knights prefer closed positions (more pawns), rooks prefer open ones (fewer pawns)
+    int pawn_density_score = total_pawns - 16; // ranges from 0 (open) to -16 (closed)
+    final_score += KNIGHTS_IN_CROWD_BONUS * (white_knights - black_knights) * -pawn_density_score;
+    final_score += ROOKS_IN_CROWD_PENALTY * (white_rooks - black_rooks) * pawn_density_score;
+
 
     final_score += (pos.side_to_move == WHITE ? TEMPO_BONUS : -TEMPO_BONUS);
 
@@ -2012,7 +2051,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.53\n";
+            std::cout << "id name Amira 1.55\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
