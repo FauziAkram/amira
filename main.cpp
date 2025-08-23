@@ -770,30 +770,32 @@ uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
+constexpr uint64_t LIGHT_SQUARES_MASK = 0x55AA55AA55AA55AAULL;
+constexpr uint64_t DARK_SQUARES_MASK  = 0xAA55AA55AA55AA55ULL;
 
 const PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 72};
-const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
-const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
-const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
-const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
-const PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
-const PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
-const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
-const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
-const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-const PhaseScore ROOK_ON_SEVENTH_BONUS         = {12, 39};
-const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
+const PhaseScore TEMPO_BONUS                     = {15, 15};
+const PhaseScore BISHOP_PAIR_BONUS               = {27, 72};
+const PhaseScore PAWN_CONNECTED_BONUS            = {9, 15};
+const PhaseScore PROTECTED_PAWN_BONUS            = {8, 13};
+const PhaseScore ISOLATED_PAWN_PENALTY           = {-14, -22};
+const PhaseScore DOUBLED_PAWN_PENALTY            = {-12, -18};
+const PhaseScore BACKWARD_PAWN_PENALTY           = {-9, -14};
+const PhaseScore KNIGHT_MOBILITY_BONUS           = {2, 3};
+const PhaseScore BISHOP_MOBILITY_BONUS           = {3, 4};
+const PhaseScore ROOK_MOBILITY_BONUS             = {3, 5};
+const PhaseScore QUEEN_MOBILITY_BONUS            = {2, 3};
+const PhaseScore KNIGHT_OUTPOST_BONUS            = {30, 20};
+const PhaseScore BISHOP_OUTPOST_BONUS            = {25, 18};
+const PhaseScore POTENTIAL_DOMINANCE_BONUS       = {6, 4};
+const PhaseScore ROOK_ON_OPEN_FILE               = {28, 12};
+const PhaseScore ROOK_ON_SEMI_OPEN_FILE          = {11, 8};
+const PhaseScore ROOK_ON_SEVENTH_BONUS           = {12, 39};
+const int passed_pawn_enemy_king_dist_bonus_eg = 4;
 const PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
@@ -807,6 +809,12 @@ const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
 const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
 const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
 
+// --- NEW EVALUATION CONSTANTS (Recalibrated) ---
+const PhaseScore BISHOP_OBSTRUCTED_BY_PAWN_PENALTY = {-7, -12};
+const PhaseScore PAWN_STORM_THREAT[8] = { // Indexed by relative rank of enemy pawn
+    {0, 0}, {0, 0}, {-3, -6}, {-6, -12}, {-15, -28}, {-28, -40}, {0, 0}, {0, 0}
+};
+// --- END NEW EVALUATION CONSTANTS ---
 
 // --- Evaluation Constants for King Safety ---
 // Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
@@ -987,8 +995,8 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     if (white_bishops == 1 && black_bishops == 1) {
         uint64_t w_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[WHITE];
         uint64_t b_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[BLACK];
-        bool w_b_is_light = ( (set_bit(lsb_index(w_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
-        bool b_b_is_light = ( (set_bit(lsb_index(b_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
+        bool w_b_is_light = ( (set_bit(lsb_index(w_b_bb)) & LIGHT_SQUARES_MASK) != 0 );
+        bool b_b_is_light = ( (set_bit(lsb_index(b_b_bb)) & LIGHT_SQUARES_MASK) != 0 );
 
         if (w_b_is_light != b_b_is_light) {
             // Significant draw factor for OCB endgames
@@ -1152,6 +1160,13 @@ int evaluate(Position& pos) {
             }
         }
     }
+
+    // Pre-calculate rammed pawns for both sides for bishop evaluation
+    uint64_t all_pawns = pos.piece_bb[PAWN];
+    uint64_t w_pawns = all_pawns & pos.color_bb[WHITE];
+    uint64_t b_pawns = all_pawns & pos.color_bb[BLACK];
+    uint64_t rammed_w_pawns = south(b_pawns) & w_pawns;
+    uint64_t rammed_b_pawns = north(w_pawns) & b_pawns;
     
     // --- Stage 2: Score pieces, mobility, king safety, and threats ---
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
@@ -1218,7 +1233,14 @@ int evaluate(Position& pos) {
                     int relative_rank = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
                     if (relative_rank == 6) current_color_score += ROOK_ON_SEVENTH_BONUS;
                 }
-                else if ((Piece)p == KNIGHT || (Piece)p == BISHOP) {
+                else if ((Piece)p == BISHOP) {
+                     // Bishop obstructed by friendly pawns penalty
+                     uint64_t square_color_mask = (get_bit(LIGHT_SQUARES_MASK, sq)) ? LIGHT_SQUARES_MASK : DARK_SQUARES_MASK;
+                     uint64_t friendly_rammed = (current_eval_color == WHITE) ? rammed_w_pawns : rammed_b_pawns;
+                     int obstructing_pawns = pop_count(friendly_rammed & square_color_mask);
+                     current_color_score += (BISHOP_OBSTRUCTED_BY_PAWN_PENALTY * obstructing_pawns);
+                }
+                if ((Piece)p == KNIGHT || (Piece)p == BISHOP) {
                     int rank = sq / 8;
                     int relative_rank_idx = (current_eval_color == WHITE) ? rank : 7 - rank;
                     if (relative_rank_idx >= 3 && relative_rank_idx <= 5) { // Ranks 4, 5, 6
@@ -1257,33 +1279,45 @@ int evaluate(Position& pos) {
         // --- King Safety and Shelter Evaluation ---
         int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
         if (king_sq != -1) {
-            int shelter_score = 0;
+            PhaseScore shelter_and_storm_score = {};
             int king_file = king_sq % 8, king_rank = king_sq / 8;
             int shield_f_start = std::max(0, king_file - 1);
             int shield_f_end = std::min(7, king_file + 1);
-            int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
-            int shield_rank_2 = (current_eval_color == WHITE) ? king_rank + 2 : king_rank - 2;
-
-            if (shield_rank_1 >= 0 && shield_rank_1 < 8) {
-                for (int f = shield_f_start; f <= shield_f_end; ++f) {
-                    uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
-                    if (!friendly_pawns_on_file) {
-                        shelter_score += SHIELD_PAWN_MISSING_PENALTY;
-                        if (!(file_bb_mask[f] & all_enemy_pawns))
-                            shelter_score += SHIELD_OPEN_FILE_PENALTY;
-                    } else {
-                        bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
-                        bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
-                        if (pawn_on_shield_rank_1) shelter_score += SHIELD_PAWN_PRESENT_BONUS;
-                        else if (pawn_on_shield_rank_2) shelter_score += SHIELD_PAWN_ADVANCED_PENALTY;
-                        else shelter_score += SHIELD_PAWN_MISSING_PENALTY;
-                    }
+            
+            for (int f = shield_f_start; f <= shield_f_end; ++f) {
+                // Shelter part
+                uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
+                if (!friendly_pawns_on_file) {
+                    shelter_and_storm_score.mg += SHIELD_PAWN_MISSING_PENALTY;
+                    if (!(file_bb_mask[f] & all_enemy_pawns))
+                        shelter_and_storm_score.mg += SHIELD_OPEN_FILE_PENALTY;
+                } else {
+                    int shield_rank_1 = (current_eval_color == WHITE) ? king_rank + 1 : king_rank - 1;
+                    int shield_rank_2 = (current_eval_color == WHITE) ? king_rank + 2 : king_rank - 2;
+                     if (shield_rank_1 >= 0 && shield_rank_1 < 8 && get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f))
+                        shelter_and_storm_score.mg += SHIELD_PAWN_PRESENT_BONUS;
+                     else if (shield_rank_2 >= 0 && shield_rank_2 < 8 && get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f))
+                        shelter_and_storm_score.mg += SHIELD_PAWN_ADVANCED_PENALTY;
+                     else
+                        shelter_and_storm_score.mg += SHIELD_PAWN_MISSING_PENALTY;
+                }
+                
+                // Pawn storm part
+                uint64_t enemy_pawns_on_file = file_bb_mask[f] & all_enemy_pawns;
+                if(enemy_pawns_on_file) {
+                    int storming_pawn_sq = (current_eval_color == WHITE) ? lsb_index(enemy_pawns_on_file) : (63 - lsb_index(_byteswap_uint64(enemy_pawns_on_file)));
+                    int storming_pawn_rank = storming_pawn_sq / 8;
+                    int relative_storm_rank = (current_eval_color == WHITE) ? (7-storming_pawn_rank) : storming_pawn_rank;
+                    shelter_and_storm_score += PAWN_STORM_THREAT[relative_storm_rank];
+                    // Bonus if our pawn is blocking their storm
+                    if(friendly_pawns_on_file && get_bit(friendly_pawns_on_file, (current_eval_color == WHITE ? storming_pawn_sq+8 : storming_pawn_sq-8)))
+                        shelter_and_storm_score.mg += 5;
                 }
             }
-
+            
             int home_rank = (current_eval_color == WHITE) ? 0 : 7;
             if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
-                current_color_score.mg += shelter_score;
+                current_color_score += shelter_and_storm_score;
 
             int king_danger_value = 0;
             auto calculate_tropism = [&](int p_sq) {
@@ -1309,7 +1343,7 @@ int evaluate(Position& pos) {
         else
             final_score -= current_color_score;
     }
-
+    
     final_score += (pos.side_to_move == WHITE ? TEMPO_BONUS : -TEMPO_BONUS);
 
     game_phase = std::min(game_phase, 24);
