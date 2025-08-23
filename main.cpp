@@ -230,7 +230,7 @@ struct Position {
     Piece piece_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_PIECE;
         uint64_t b = set_bit(sq);
-        if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE; // Optimization
+        if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE;
         for (int p = PAWN; p <= KING; ++p)
             if (piece_bb[p] & b) return (Piece)p;
         return NO_PIECE; // Should not be reached if occupied bit was set
@@ -372,7 +372,6 @@ uint64_t reference_bishop_attacks(int sq, uint64_t occupied) {
 // Function to initialize the magic bitboard tables
 void init_magic_bitboards() {
     for (int sq = 0; sq < 64; ++sq) {
-        // Initialize rook magics
         uint64_t mask = magic_rook_mask[sq];
         int num_mask_bits = pop_count(mask);
         for (int i = 0; i < (1 << num_mask_bits); ++i) {
@@ -388,7 +387,6 @@ void init_magic_bitboards() {
             magic_rook_indices[sq][index] = reference_rook_attacks(sq, blockers);
         }
 
-        // Initialize bishop magics
         mask = magic_bishop_mask[sq];
         num_mask_bits = pop_count(mask);
         for (int i = 0; i < (1 << num_mask_bits); ++i) {
@@ -422,7 +420,7 @@ inline uint64_t get_queen_attacks(int sq, uint64_t occupied) {
     return get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
 }
 
-// --- is_square_attacked (updated with magic bitboards) ---
+// --- is_square_attacked ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
     if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
@@ -456,7 +454,7 @@ uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occu
     return attackers;
 }
 
-// --- Move Generation (updated with magic bitboards) --- //
+// --- Move Generation ---
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
     int move_count = 0;
     int stm = pos.side_to_move;
@@ -568,7 +566,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     uint64_t from_bb = set_bit(move.from);
     uint64_t to_bb = set_bit(move.to);
     Piece piece_moved = pos.piece_on_sq(move.from);
-    Piece piece_captured = pos.piece_on_sq(move.to); // Piece on 'to' square before move
+    Piece piece_captured = pos.piece_on_sq(move.to);
 
     if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) return pos; // Moving no piece or opponent's piece
     if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) return pos; // Tried to capture own piece
@@ -695,7 +693,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 const PhaseScore piece_phase_values[6] = {
     {91, 132}, {373, 398}, {386, 420}, {564, 667}, {1096, 1287}, {0, 0}
 };
-const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0}; // For SEE
+const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
@@ -770,6 +768,7 @@ uint64_t white_passed_pawn_block_mask[64];
 uint64_t black_passed_pawn_block_mask[64];
 uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
+constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
 const PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
@@ -987,8 +986,8 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     if (white_bishops == 1 && black_bishops == 1) {
         uint64_t w_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[WHITE];
         uint64_t b_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[BLACK];
-        bool w_b_is_light = ( (set_bit(lsb_index(w_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
-        bool b_b_is_light = ( (set_bit(lsb_index(b_b_bb)) & 0xAA55AA55AA55AA55ULL) == 0 );
+        bool w_b_is_light = get_bit(LIGHT_SQUARES, lsb_index(w_b_bb));
+        bool b_b_is_light = get_bit(LIGHT_SQUARES, lsb_index(b_b_bb));
 
         if (w_b_is_light != b_b_is_light) {
             // Significant draw factor for OCB endgames
@@ -1110,7 +1109,6 @@ int evaluate(Position& pos) {
         pawn_entry.black_passed_pawns = black_passed_pawns;
     }
     final_score += pawn_score;
-    // --- End of Pawn Evaluation ---
 
     // --- Stage 1: Pre-calculate all attack information ---
     uint64_t attackedBy[2][7] = {{0}}; // [color][piece_type], 6 for ALL_PIECES
@@ -1666,7 +1664,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
     return alpha;
 }
 
-// Search function signature and repetition logic
+// --- Main Search Function ---
 int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move) {
     search_path_hashes[ply] = pos.zobrist_hash;
 
@@ -2012,7 +2010,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.53\n";
+            std::cout << "id name Amira 1.54\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
             std::cout << "uciok\n" << std::flush;
