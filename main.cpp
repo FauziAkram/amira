@@ -233,7 +233,7 @@ struct Position {
         if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE;
         for (int p = PAWN; p <= KING; ++p)
             if (piece_bb[p] & b) return (Piece)p;
-        return NO_PIECE;
+        return NO_PIECE; // Should not be reached if occupied bit was set
     }
     Color color_on_sq(int sq) const {
         if (sq < 0 || sq >= 64) return NO_COLOR;
@@ -2302,4 +2302,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
