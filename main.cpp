@@ -62,7 +62,7 @@ enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
-constexpr int TT_SIZE_MB_DEFAULT = 512;
+constexpr int TT_SIZE_MB_DEFAULT = 1024;
 constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
@@ -2012,7 +2012,7 @@ void uci_loop() {
         if (token == "uci") {
             std::cout << "id name Amira 1.54\n";
             std::cout << "id author ChessTubeTree\n";
-            std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 1024\n";
+            std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) {
@@ -2031,7 +2031,7 @@ void uci_loop() {
                 if (name_str == "Hash") {
                     try {
                         int parsed_size = std::stoi(value_str_val);
-                        g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 1024));
+                        g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 16384));
                     } catch (...) { /* ignore parse error, keep default */ }
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
@@ -2302,3 +2302,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
