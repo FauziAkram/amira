@@ -62,7 +62,7 @@ enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr int MAX_PLY = 128;
-constexpr int TT_SIZE_MB_DEFAULT = 1024;
+constexpr int TT_SIZE_MB_DEFAULT = 512;
 constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
@@ -2302,4 +2302,5 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
 
