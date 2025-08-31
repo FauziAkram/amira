@@ -1429,6 +1429,7 @@ bool use_time_limits = false;
 Move killer_moves[MAX_PLY][2];
 int move_history_score[2][64][64];
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
+int late_move_pruning_counts[2][MAX_PLY]; // For Late Move Pruning [improving][depth]
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
 constexpr int MAX_HISTORY_SCORE = 24000;
 constexpr int TACTICAL_LOOKAHEAD_MIN_DEPTH = 5;
@@ -1451,6 +1452,7 @@ void reset_search_heuristics() {
     std::memset(killer_moves, 0, sizeof(killer_moves));
     std::memset(move_history_score, 0, sizeof(move_history_score));
     std::memset(refutation_moves, 0, sizeof(refutation_moves));
+    std::memset(late_move_pruning_counts, 0, sizeof(late_move_pruning_counts));
 
     // Initialize LMR table
     for (int d = 1; d < MAX_PLY; ++d) {
@@ -1469,6 +1471,12 @@ void reset_search_heuristics() {
             
             search_reductions[d][m] = r;
         }
+    }
+    // Initialize LMP table
+    for (int d = 1; d < MAX_PLY; ++d) {
+        // [0] = not improving, [1] = improving
+        late_move_pruning_counts[0][d] = 2 + (d * d) / 2;
+        late_move_pruning_counts[1][d] = 4 + d * d;
     }
 }
 
@@ -1780,7 +1788,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Cache if the move is quiet using fast bitboard checks
         bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
-
+    
         legal_moves_played++;
         int score;
         bool is_repetition = false;
@@ -1816,6 +1824,12 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                         improving = static_eval > search_path_evals[ply-2];
                     R_lmr = search_reductions[depth][legal_moves_played];
                     if (!improving) R_lmr++; // More reduction if not improving
+
+                    // Deeper reductions for very late, low-history moves (Soft LMP)
+                    if (legal_moves_played >= late_move_pruning_counts[improving][depth] && current_move.score <= 0) {
+                        R_lmr++; // Increase reduction by 1
+                    }
+
                     if (is_pv_node) R_lmr--; // Less reduction in PV nodes
                 }
                 R_lmr = std::max(0, R_lmr);
@@ -2010,7 +2024,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.56\n";
+            std::cout << "id name Amira 1.57\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
