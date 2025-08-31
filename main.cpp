@@ -691,9 +691,9 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
 // --- Evaluation ---
 const PhaseScore piece_phase_values[6] = {
-    {91, 132}, {373, 398}, {386, 420}, {564, 667}, {1096, 1287}, {0, 0}
+    {87, 138}, {400, 437}, {414, 465}, {596, 735}, {1194, 1455}, {0, 0}
 };
-const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0};
+const int see_piece_values[7] = {102, 371, 384, 597, 1107, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
@@ -775,12 +775,12 @@ const PhaseScore passed_pawn_bonus[8] = {
 };
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 72};
-const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
+const PhaseScore TEMPO_BONUS                   = {18, 18};
+const PhaseScore BISHOP_PAIR_BONUS             = {25, 80};
+const PhaseScore PAWN_CONNECTED_BONUS          = {10, 18};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
+const PhaseScore ISOLATED_PAWN_PENALTY         = {-9, -19};
+const PhaseScore DOUBLED_PAWN_PENALTY          = {-9, -18};
 const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
 const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
 const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
@@ -1455,8 +1455,7 @@ void reset_search_heuristics() {
     // Initialize LMR table
     for (int d = 1; d < MAX_PLY; ++d) {
         for (int m = 1; m < 256; ++m) {
-            // Formula: log(depth) * log(moves_searched) / C
-            double reduction = (log(d) * log(m)) / 2.3;
+            double reduction = 0.7844 + (log(d) * log(m)) / 2.47;
             
             int r = static_cast<int>(reduction);
 
@@ -1694,14 +1693,14 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (!is_pv_node && !in_check) {
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
-            int futility_margin = 90 + 60 * depth;
+            int futility_margin = 78 + 32 * depth;
             if (static_eval - futility_margin >= beta)
                 return beta; 
         }
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 250 + 80 * (depth-1);
+            int razoring_margin = 124 + 66 * depth;
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
@@ -2183,7 +2182,7 @@ void uci_loop() {
             int best_score_overall = 0;
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
-            int aspiration_window_delta = 25;
+            int aspiration_window_delta = 20;
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
