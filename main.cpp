@@ -1665,7 +1665,7 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 }
 
 // --- Main Search Function ---
-int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move) {
+int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_node, bool can_null_move, const Move& prev_move, const Move& excluded_move = NULL_MOVE) {
     search_path_hashes[ply] = pos.zobrist_hash;
 
     nodes_searched++;
@@ -1675,8 +1675,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (pos.halfmove_clock >= 100 && ply > 0) return 0;
     if (ply > 0 && is_insufficient_material(pos)) return 0;
 
+    int extension = 0;
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
-    if (in_check) depth++;
+    if (in_check) extension = 1;
 
     if (depth <= 0) return quiescence_search(pos, alpha, beta, ply);
 
@@ -1684,7 +1685,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     Move tt_move = NULL_MOVE;
     int tt_score;
     int tt_eval = NO_EVAL_STORED;
-    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score, tt_eval))
+    if (probe_tt(pos.zobrist_hash, depth, ply, alpha, beta, tt_move, tt_score, tt_eval) && excluded_move.is_null())
         return tt_score;
 
     int static_eval = (tt_eval != NO_EVAL_STORED) ? tt_eval : evaluate(pos);
@@ -1724,7 +1725,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1;
 
             int R_nmp = 3 + (depth > 6);
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
+            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE, NULL_MOVE);
             
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -1732,6 +1733,26 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                  store_tt(pos.zobrist_hash, depth, ply, null_score, TT_LOWER, NULL_MOVE, static_eval);
                  return beta;
             }
+    }
+
+    // --- Singular Extension Search ---
+    // If the TT move seems much better than other options, verify it.
+    TTEntry& entry = transposition_table[pos.zobrist_hash & tt_mask]; // Re-probe for full entry
+    if (!is_pv_node
+        && depth >= 8
+        && !tt_move.is_null()
+        && entry.bound == TT_LOWER
+        && std::abs(entry.score) < MATE_THRESHOLD
+        && excluded_move.is_null())
+    {
+        int singular_beta = entry.score - (2 * depth);
+        int verification_depth = (depth - 1) / 2;
+
+        // Re-search the position, but EXCLUDING the strong TT move.
+        int singular_score = search(pos, verification_depth, singular_beta - 1, singular_beta, ply, false, false, NULL_MOVE, tt_move);
+
+        if (singular_score < singular_beta)
+            extension = std::max(1, extension); // Grant at least +1 extension
     }
 
         // --- Tactical Lookahead Pruning ---
@@ -1751,7 +1772,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
             // Search with a reduced depth and the raised beta
             int tactical_score = -search(next_pos, depth - 1 - TACTICAL_LOOKAHEAD_REDUCTION,
-                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move);
+                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move, NULL_MOVE);
 
             if (stop_search_flag) return 0;
 
@@ -1775,6 +1796,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     while(!(current_move = picker.next_move()).is_null()) {
         bool legal;
+        if (current_move == excluded_move) continue;
         Position next_pos = make_move(pos, current_move, legal);
         if (!legal) continue;
 
@@ -1805,8 +1827,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (is_quiet)
                 quiet_moves_for_history.push_back(current_move);
 
-            if (legal_moves_played == 1) // PVS: First move gets full window search
-                score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
+            if (legal_moves_played == 1 && !excluded_move.is_null()) // Full window for singular verification search
+                score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, is_pv_node, true, current_move, NULL_MOVE);
             else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
@@ -1820,12 +1842,12 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                 }
                 R_lmr = std::max(0, R_lmr);
 
-                score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
+                score = -search(next_pos, depth - 1 - R_lmr + extension, -alpha - 1, -alpha, ply + 1, false, true, current_move, NULL_MOVE);
                 
                 if (score > alpha && R_lmr > 0) // Re-search if reduction was too aggressive
-                     score = -search(next_pos, depth - 1, -alpha - 1, -alpha, ply + 1, false, true, current_move);
+                     score = -search(next_pos, depth - 1 + extension, -alpha - 1, -alpha, ply + 1, false, true, current_move, NULL_MOVE);
                 if (score > alpha && score < beta)
-                     score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, false, true, current_move);
+                     score = -search(next_pos, depth - 1 + extension, -beta, -alpha, ply + 1, false, true, current_move, NULL_MOVE);
             }
         }
 
@@ -2188,13 +2210,13 @@ void uci_loop() {
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
                 if (depth <= 1)
-                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, uci_last_root_move);
+                     current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, uci_last_root_move, NULL_MOVE);
                 else {
-                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move);
+                    current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move, NULL_MOVE);
                     if (!stop_search_flag && (current_score <= aspiration_alpha || current_score >= aspiration_beta)) {
                         aspiration_alpha = -INF_SCORE;
                         aspiration_beta = INF_SCORE;
-                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move);
+                        current_score = search(uci_root_pos, depth, aspiration_alpha, aspiration_beta, 0, true, true, uci_last_root_move, NULL_MOVE);
                     }
                 }
 
@@ -2302,3 +2324,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
