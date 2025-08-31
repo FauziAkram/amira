@@ -1694,14 +1694,14 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (!is_pv_node && !in_check) {
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
-            int futility_margin = 90 + 60 * depth;
+            int futility_margin = 70 + 50 * depth;
             if (static_eval - futility_margin >= beta)
                 return beta; 
         }
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 250 + 80 * (depth-1);
+            int razoring_margin = 182 + 78 * (depth-1);
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
@@ -1723,7 +1723,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.zobrist_hash ^= zobrist_side_to_move;
             null_next_pos.ply = pos.ply + 1;
 
-            int R_nmp = (depth > 6) ? 3 : 2;
+            int R_nmp = 3 + (depth > 6);
             int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
@@ -2010,7 +2010,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.55\n";
+            std::cout << "id name Amira 1.56\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2183,7 +2183,7 @@ void uci_loop() {
             int best_score_overall = 0;
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
-            int aspiration_window_delta = 25;
+            int aspiration_window_delta = 15;
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
