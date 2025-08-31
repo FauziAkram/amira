@@ -1788,7 +1788,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Cache if the move is quiet using fast bitboard checks
         bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
-    
+
         legal_moves_played++;
         int score;
         bool is_repetition = false;
@@ -2316,3 +2316,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
