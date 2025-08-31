@@ -691,9 +691,9 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
 // --- Evaluation ---
 const PhaseScore piece_phase_values[6] = {
-    {91, 132}, {373, 398}, {386, 420}, {564, 667}, {1096, 1287}, {0, 0}
+    {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
-const int see_piece_values[7] = {100, 320, 330, 500, 900, 10000, 0};
+const int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
@@ -776,11 +776,11 @@ const PhaseScore passed_pawn_bonus[8] = {
 
 // --- Evaluation Constants ---
 const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 72};
-const PhaseScore PAWN_CONNECTED_BONUS          = {9, 15};
+const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
+const PhaseScore PAWN_CONNECTED_BONUS          = {10, 16};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -22};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-12, -18};
+const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
+const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
 const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
 const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
 const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
@@ -2010,7 +2010,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.54\n";
+            std::cout << "id name Amira 1.55\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
