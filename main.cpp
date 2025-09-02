@@ -1816,23 +1816,29 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (legal_moves_played == 1) // PVS: First move gets full window search
                 score = -search(next_pos, depth - 1, -beta, -alpha, ply + 1, true, true, current_move);
             else {
+                // ==================================================================
+                // >>>>>>>>>>>>>>>>>> MODIFICATION FOR LMR STARTS HERE <<<<<<<<<<<<<<<<
+                // ==================================================================
                 int R_lmr = 0;
-                // Late Move Reductions (LMR) with table
-                if (depth >= 3 && depth < MAX_PLY && legal_moves_played > 1 && is_quiet) {
-                    bool improving = false;
-                    if (ply >= 2 && !in_check)
-                        improving = static_eval > search_path_evals[ply-2];
+                if (depth >= 3 && legal_moves_played > 1 && is_quiet) {
+                    // Start with base reduction from the table
                     R_lmr = search_reductions[depth][legal_moves_played];
-                    if (!improving) R_lmr++; // More reduction if not improving
-
-                    // Deeper reductions for very late, low-history moves (Soft LMP)
-                    if (legal_moves_played >= late_move_pruning_counts[improving][depth] && current_move.score <= 0) {
-                        R_lmr++; // Increase reduction by 1
-                    }
-
-                    if (is_pv_node) R_lmr--; // Less reduction in PV nodes
+    
+                    // Adjust based on node and position properties
+                    bool improving = (ply >= 2 && !in_check) && (static_eval > search_path_evals[ply-2]);
+                    if (improving) R_lmr--;
+                    if (is_pv_node) R_lmr--;
+    
+                    // Key change: Modulate reduction based on the move's history score.
+                    // A good move (high score) gets a smaller reduction.
+                    // A bad move (negative score) gets a larger reduction.
+                    // The divisor is a tunable parameter. 8192 gives a range of +/- ~3.
+                    R_lmr -= current_move.score / 8192;
                 }
                 R_lmr = std::max(0, R_lmr);
+                // ================================================================
+                // >>>>>>>>>>>>>>>>>> MODIFICATION FOR LMR ENDS HERE <<<<<<<<<<<<<<<<
+                // ================================================================
 
                 score = -search(next_pos, depth - 1 - R_lmr, -alpha - 1, -alpha, ply + 1, false, true, current_move);
                 
