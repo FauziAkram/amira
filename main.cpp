@@ -1818,19 +1818,28 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             else {
                 int R_lmr = 0;
                 // Late Move Reductions (LMR) with table
-                if (depth >= 3 && depth < MAX_PLY && legal_moves_played > 1 && is_quiet) {
+                if (depth >= 3 && legal_moves_played > 1 && is_quiet) {
                     bool improving = false;
                     if (ply >= 2 && !in_check)
                         improving = static_eval > search_path_evals[ply-2];
                     R_lmr = search_reductions[depth][legal_moves_played];
-                    if (!improving) R_lmr++; // More reduction if not improving
+                    // Adjust reduction based on various factors, inspired by modern engines
+                    if (!improving) R_lmr++;
+                    if (is_pv_node) R_lmr--;
 
-                    // Deeper reductions for very late, low-history moves (Soft LMP)
-                    if (legal_moves_played >= late_move_pruning_counts[improving][depth] && current_move.score <= 0) {
-                        R_lmr++; // Increase reduction by 1
+                    // Reduce less for moves with a good history score
+                    if (current_move.score > 12000) R_lmr--;
+
+                    // If TT move is a capture, position is likely tactical, reduce quiet moves more
+                    if (!tt_move.is_null()) {
+                        bool tt_move_is_capture = get_bit(opp_pieces, tt_move.to) || (pos.piece_on_sq(tt_move.from) == PAWN && tt_move.to == pos.ep_square);
+                        if (tt_move_is_capture) R_lmr++;
                     }
 
-                    if (is_pv_node) R_lmr--; // Less reduction in PV nodes
+                    // Late Move Pruning for very late moves
+                    if (legal_moves_played >= late_move_pruning_counts[improving][depth]) {
+                        R_lmr++; // Increase reduction by 1
+                    }
                 }
                 R_lmr = std::max(0, R_lmr);
 
