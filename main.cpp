@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstring> // For std::memset
 #include <cstdint>
-#include <random>   // For std::mt19937_64
+#include <random>   // For std::mt1937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::log
 #include <functional> // For std::partition
@@ -695,6 +695,27 @@ const PhaseScore piece_phase_values[6] = {
 };
 const int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
 
+// --- START: Material Imbalance Tables from Engine 2 ---
+int my_pieces[5][5] = {
+    // pawn, knight, bishop, rook, queen (attacker)
+    { 16, 0, 0, 0, 0 },    // pawn (victim)
+    { 146, -40, 0, 0, 0 },   // knight
+    { 55, 12, 7, 0, 0 },    // bishop
+    { 32, 31, 61, -81, 0 },  // rook
+    { 12, 80, 75, -35, 12 }  // queen
+};
+
+int opponent_pieces[5][5] = {
+    // pawn, knight, bishop, rook, queen (opponent piece)
+    { 0, 0, 0, 0, 0 },      // pawn (our piece)
+    { 42, 0, 0, 0, 0 },     // knight
+    { 40, 12, 0, 0, 0 },    // bishop
+    { 50, 9, -11, 0, 0 },   // rook
+    { 88, -28, 60, 96, 0 }  // queen
+};
+// --- END: Material Imbalance Tables from Engine 2 ---
+
+
 // --- PIECE-SQUARE TABLES ---
 
 const PhaseScore pawn_pst[64] = {
@@ -774,7 +795,7 @@ const PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
 
-// --- Evaluation Constants ---
+// Evaluation Constants
 const PhaseScore TEMPO_BONUS                   = {15, 15};
 const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
 const PhaseScore PAWN_CONNECTED_BONUS          = {10, 16};
@@ -900,6 +921,49 @@ bool is_insufficient_material(const Position& pos) {
     // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
     return false;
 }
+
+// --- START: Material Imbalance Function from Engine 2 ---
+// Calculates a bonus/penalty based on the combination of pieces on the board.
+int evaluate_material_imbalance(const Position& pos) {
+    // Piece counts for each side (excluding pawns and kings)
+    int piece_count[2][5] = {{0}}; // [color][piece_type_index]
+    piece_count[WHITE][0] = pop_count(pos.piece_bb[PAWN]   & pos.color_bb[WHITE]);
+    piece_count[WHITE][1] = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
+    piece_count[WHITE][2] = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
+    piece_count[WHITE][3] = pop_count(pos.piece_bb[ROOK]   & pos.color_bb[WHITE]);
+    piece_count[WHITE][4] = pop_count(pos.piece_bb[QUEEN]  & pos.color_bb[WHITE]);
+
+    piece_count[BLACK][0] = pop_count(pos.piece_bb[PAWN]   & pos.color_bb[BLACK]);
+    piece_count[BLACK][1] = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
+    piece_count[BLACK][2] = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
+    piece_count[BLACK][3] = pop_count(pos.piece_bb[ROOK]   & pos.color_bb[BLACK]);
+    piece_count[BLACK][4] = pop_count(pos.piece_bb[QUEEN]  & pos.color_bb[BLACK]);
+
+    int white_bonus = 0;
+    int black_bonus = 0;
+
+    // Calculate white's bonus
+    for (int pt1 = 0; pt1 < 5; ++pt1) {
+        if (!piece_count[WHITE][pt1]) continue;
+        for (int pt2 = 0; pt2 <= pt1; ++pt2) {
+            white_bonus += my_pieces[pt1][pt2] * piece_count[WHITE][pt1] * piece_count[WHITE][pt2];
+            white_bonus += opponent_pieces[pt1][pt2] * piece_count[WHITE][pt1] * piece_count[BLACK][pt2];
+        }
+    }
+
+    // Calculate black's bonus
+    for (int pt1 = 0; pt1 < 5; ++pt1) {
+        if (!piece_count[BLACK][pt1]) continue;
+        for (int pt2 = 0; pt2 <= pt1; ++pt2) {
+            black_bonus += my_pieces[pt1][pt2] * piece_count[BLACK][pt1] * piece_count[BLACK][pt2];
+            black_bonus += opponent_pieces[pt1][pt2] * piece_count[BLACK][pt1] * piece_count[WHITE][pt2];
+        }
+    }
+    
+    // The imbalance score is returned as a single integer (middlegame only)
+    return (white_bonus - black_bonus) / 16;
+}
+// --- END: Material Imbalance Function ---
 
 // Helper function to evaluate pawn structure for one color
 void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
@@ -1307,6 +1371,12 @@ int evaluate(Position& pos) {
         else
             final_score -= current_color_score;
     }
+    
+    // --- START: Add Material Imbalance Bonus ---
+    int imbalance_score = evaluate_material_imbalance(pos);
+    final_score.mg += imbalance_score; 
+    // Endgame imbalance is typically not considered in this model, so we only apply to MG.
+    // --- END: Add Material Imbalance Bonus ---
 
     final_score += (pos.side_to_move == WHITE ? TEMPO_BONUS : -TEMPO_BONUS);
 
