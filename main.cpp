@@ -808,30 +808,22 @@ const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
 
 
 // --- Evaluation Constants for King Safety ---
-// Piece Tropism: Bonus for pieces near the enemy king (by Chebyshev distance)
-const int king_tropism_table[8] = { 0, 1, 2, 4, 8, 12, 15, 20 }; // Reversed for easier use (dist 0 = max bonus)
-
-// Weights for different attacking pieces
-constexpr int KING_ATTACK_WEIGHT_Q = 5;
-constexpr int KING_ATTACK_WEIGHT_R = 3;
-constexpr int KING_ATTACK_WEIGHT_B = 2;
-constexpr int KING_ATTACK_WEIGHT_N = 2;
-
-// King Threat Penalty Table (indexed by combined weighted tropism score)
-const int king_threat_penalty_mg[31] = {
-    0,  0,  3,  7, 15, 24, 34, 45, 57, 69, 83, 98, 113, 128, 148,
-  168,188,208,228,248,268,288,308,328,348,368, 388, 408, 428, 448, 468
-};
-const int king_threat_penalty_eg[31] = {
-    0,  0,  2,  4,  8, 12, 16, 20, 25, 30, 35,  40,  45,  50,  55,
-   60, 65, 70, 75, 80, 85, 90, 95,100,105,110, 115, 120, 125, 130, 135
-};
-
 // King Shelter Penalties (Middlegame only)
 const int SHIELD_PAWN_PRESENT_BONUS = 10;
 const int SHIELD_PAWN_MISSING_PENALTY = -20;
 const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
 const int SHIELD_OPEN_FILE_PENALTY = -15;
+const int SafetyKnightWeight    = 32;
+const int SafetyBishopWeight    = 19;
+const int SafetyRookWeight      = 27;
+const int SafetyQueenWeight     = 23;
+const int SafetyAttackValue     = 32;
+const int SafetyWeakSquares     = 39;
+const int SafetySafeQueenCheck  = 66;
+const int SafetySafeRookCheck   = 61;
+const int SafetySafeBishopCheck = 50;
+const int SafetySafeKnightCheck = 58;
+const int SafetyAdjustment      = -63;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -1114,6 +1106,11 @@ int evaluate(Position& pos) {
     uint64_t attackedBy[2][7] = {{0}}; // [color][piece_type], 6 for ALL_PIECES
     uint64_t attackedBy2[2] = {0}; // Squares attacked by 2 or more pieces
 
+    // King Safety info
+    uint64_t king_areas[2];
+    int king_attackers_count[2] = {0};
+    int king_attackers_weight[2] = {0};
+
     uint64_t occupied = pos.get_occupied_bb();
 
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
@@ -1126,7 +1123,10 @@ int evaluate(Position& pos) {
             attackedBy[c][PAWN] |= pawn_attacks_bb[c][sq];
         }
         int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[c]);
-        if (king_sq != -1) attackedBy[c][KING] = king_attacks_bb[king_sq];
+        if (king_sq != -1) {
+             attackedBy[c][KING] = king_attacks_bb[king_sq];
+             king_areas[c] = king_attacks_bb[king_sq];
+        }
 
         attackedBy[c][6] = attackedBy[c][PAWN] | attackedBy[c][KING];
         attackedBy2[c] = attackedBy[c][PAWN] & attackedBy[c][KING];
@@ -1155,6 +1155,7 @@ int evaluate(Position& pos) {
     for (int c_idx = 0; c_idx < 2; ++c_idx) {
         Color current_eval_color = (Color)c_idx;
         Color enemy_color = (Color)(1-c_idx);
+        int king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[current_eval_color]);
         PhaseScore current_color_score;
         
         uint64_t friendly_pieces = pos.color_bb[current_eval_color];
@@ -1205,6 +1206,21 @@ int evaluate(Position& pos) {
                     current_color_score += mobility_score;
                 }
 
+                // Update King Safety calculations for the enemy king
+                uint64_t attacks_on_king_zone = 0;
+                if ((Piece)p == KNIGHT) attacks_on_king_zone = knight_attacks_bb[sq];
+                else if ((Piece)p == BISHOP) attacks_on_king_zone = get_bishop_attacks(sq, occupied);
+                else if ((Piece)p == ROOK) attacks_on_king_zone = get_rook_attacks(sq, occupied);
+                else if ((Piece)p == QUEEN) attacks_on_king_zone = get_queen_attacks(sq, occupied);
+
+                if ((attacks_on_king_zone & king_areas[enemy_color])) {
+                    king_attackers_count[enemy_color] += 1;
+                    if ((Piece)p == KNIGHT) king_attackers_weight[enemy_color] += SafetyKnightWeight;
+                    else if ((Piece)p == BISHOP) king_attackers_weight[enemy_color] += SafetyBishopWeight;
+                    else if ((Piece)p == ROOK) king_attackers_weight[enemy_color] += SafetyRookWeight;
+                    else if ((Piece)p == QUEEN) king_attackers_weight[enemy_color] += SafetyQueenWeight;
+                }
+
                 if ((Piece)p == ROOK) {
                     int f = sq % 8;
                     bool friendly_pawn_on_file = (file_bb_mask[f] & all_friendly_pawns) != 0;
@@ -1253,7 +1269,6 @@ int evaluate(Position& pos) {
         current_color_score += evaluate_threats_for_color(pos, current_eval_color, attackedBy, attackedBy2);
 
         // --- King Safety and Shelter Evaluation ---
-        int king_sq = lsb_index(pos.piece_bb[KING] & friendly_pieces);
         if (king_sq != -1) {
             int shelter_score = 0;
             int king_file = king_sq % 8, king_rank = king_sq / 8;
@@ -1283,23 +1298,39 @@ int evaluate(Position& pos) {
             if (king_rank == home_rank || (king_rank == 0 && (king_file == 6 || king_file == 2)) || (king_rank == 7 && (king_file == 62 || king_file == 58)))
                 current_color_score.mg += shelter_score;
 
-            int king_danger_value = 0;
-            auto calculate_tropism = [&](int p_sq) {
-                return king_tropism_table[7 - std::max(std::abs(king_rank - p_sq/8), std::abs(king_file - p_sq%8))];
-            };
+            // We are evaluating safety for 'current_eval_color', so we use attackers from 'enemy_color'
+            if (king_attackers_count[current_eval_color] > 1) {
+                uint64_t weak_squares = attackedBy[enemy_color][6] & ~attackedBy2[current_eval_color] & (~attackedBy[current_eval_color][6] | attackedBy[current_eval_color][QUEEN] | attackedBy[current_eval_color][KING]);
 
-            uint64_t enemy_knights = pos.piece_bb[KNIGHT] & enemy_pieces;
-            while (enemy_knights) { int sq = lsb_index(enemy_knights); enemy_knights &= enemy_knights - 1; king_danger_value += calculate_tropism(sq) * KING_ATTACK_WEIGHT_N; }
-            uint64_t enemy_bishops = pos.piece_bb[BISHOP] & enemy_pieces;
-            while (enemy_bishops) { int sq = lsb_index(enemy_bishops); enemy_bishops &= enemy_bishops - 1; king_danger_value += calculate_tropism(sq) * KING_ATTACK_WEIGHT_B; }
-            uint64_t enemy_rooks = pos.piece_bb[ROOK] & enemy_pieces;
-            while (enemy_rooks) { int sq = lsb_index(enemy_rooks); enemy_rooks &= enemy_rooks - 1; king_danger_value += calculate_tropism(sq) * KING_ATTACK_WEIGHT_R; }
-            uint64_t enemy_queens = pos.piece_bb[QUEEN] & enemy_pieces;
-            while (enemy_queens) { int sq = lsb_index(enemy_queens); enemy_queens &= enemy_queens - 1; king_danger_value += calculate_tropism(sq) * KING_ATTACK_WEIGHT_Q; }
+                uint64_t safe_squares = ~friendly_pieces & (~attackedBy[current_eval_color][6] | (weak_squares & attackedBy2[enemy_color]));
 
-            int danger_idx = std::min(king_danger_value / 25, 30);
-            current_color_score.mg -= king_threat_penalty_mg[danger_idx];
-            current_color_score.eg -= king_threat_penalty_eg[danger_idx];
+                uint64_t knight_checks = knight_attacks_bb[king_sq] & safe_squares & attackedBy[enemy_color][KNIGHT];
+                uint64_t bishop_checks = get_bishop_attacks(king_sq, occupied) & safe_squares & attackedBy[enemy_color][BISHOP];
+                uint64_t rook_checks   = get_rook_attacks(king_sq, occupied)   & safe_squares & attackedBy[enemy_color][ROOK];
+                uint64_t queen_checks  = (bishop_checks | rook_checks) & safe_squares & attackedBy[enemy_color][QUEEN];
+
+                int king_attacks_count = 0;
+                uint64_t enemy_attack_bb = attackedBy[enemy_color][6];
+                uint64_t temp_king_area = king_areas[current_eval_color];
+                while(temp_king_area) {
+                    int sq = lsb_index(temp_king_area);
+                    temp_king_area &= temp_king_area-1;
+                    if(get_bit(enemy_attack_bb, sq))
+                        king_attacks_count++;
+                }
+                
+                int safety_score = king_attackers_weight[current_eval_color];
+                safety_score += SafetyAttackValue     * king_attacks_count;
+                safety_score += SafetyWeakSquares     * pop_count(weak_squares & king_areas[current_eval_color]);
+                safety_score += SafetySafeQueenCheck  * pop_count(queen_checks);
+                safety_score += SafetySafeRookCheck   * pop_count(rook_checks);
+                safety_score += SafetySafeBishopCheck * pop_count(bishop_checks);
+                safety_score += SafetySafeKnightCheck * pop_count(knight_checks);
+                safety_score += SafetyAdjustment;
+
+                current_color_score.mg -= safety_score * safety_score / 716;
+                current_color_score.eg -= safety_score / 19;
+            }
         }
 
         if (current_eval_color == WHITE)
@@ -2024,7 +2055,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.57\n";
+            std::cout << "id name Amira 1.58\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
