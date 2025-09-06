@@ -61,6 +61,10 @@ struct PhaseScore {
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
+constexpr uint8_t EMPTY_SQUARE = 31; // A value outside the piece-color range
+inline uint8_t make_piece(Piece type, Color color) { return (uint8_t)type * 4 + (uint8_t)color; }
+inline Piece get_piece_type(uint8_t piece) { return (Piece)(piece / 4); }
+inline Color get_piece_color(uint8_t piece) { return (Color)(piece % 4); }
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 512;
 constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
@@ -205,6 +209,7 @@ uint64_t se(uint64_t b) { return south(east(b)); }
 
 // --- Board Representation ---
 struct Position {
+    uint8_t squares[64];
     uint64_t piece_bb[6];
     uint64_t color_bb[2];
     int side_to_move;
@@ -217,30 +222,23 @@ struct Position {
     int ply;
     int static_eval; // Store the last evaluation for dynamic LMR
 
-    Position() {
-        std::memset(this, 0, sizeof(Position)); // Efficiently zero out
-        side_to_move = WHITE;
-        ep_square = -1;
-        fullmove_number = 1;
-        static_eval = 0;
+    Position() : side_to_move(WHITE), ep_square(-1), castling_rights(0),
+                 zobrist_hash(0), pawn_zobrist_key(0), halfmove_clock(0),
+                 fullmove_number(1), ply(0), static_eval(0)
+    {
+        std::memset(squares, EMPTY_SQUARE, sizeof(squares));
+        std::memset(piece_bb, 0, sizeof(piece_bb));
+        std::memset(color_bb, 0, sizeof(color_bb));
     }
-
     uint64_t get_occupied_bb() const { return color_bb[WHITE] | color_bb[BLACK]; }
 
     Piece piece_on_sq(int sq) const {
-        if (sq < 0 || sq >= 64) return NO_PIECE;
-        uint64_t b = set_bit(sq);
-        if (!((color_bb[WHITE] | color_bb[BLACK]) & b)) return NO_PIECE;
-        for (int p = PAWN; p <= KING; ++p)
-            if (piece_bb[p] & b) return (Piece)p;
-        return NO_PIECE; // Should not be reached if occupied bit was set
+        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_PIECE;
+        return get_piece_type(squares[sq]);
     }
     Color color_on_sq(int sq) const {
-        if (sq < 0 || sq >= 64) return NO_COLOR;
-        uint64_t b = set_bit(sq);
-        if (color_bb[WHITE] & b) return WHITE;
-        if (color_bb[BLACK] & b) return BLACK;
-        return NO_COLOR;
+        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_COLOR;
+        return get_piece_color(squares[sq]);
     }
 };
 
@@ -565,11 +563,12 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     int opp = 1 - stm;
     uint64_t from_bb = set_bit(move.from);
     uint64_t to_bb = set_bit(move.to);
+    uint8_t moving_piece_packed = pos.squares[move.from];
     Piece piece_moved = pos.piece_on_sq(move.from);
     Piece piece_captured = pos.piece_on_sq(move.to);
 
-    if (piece_moved == NO_PIECE || pos.color_on_sq(move.from) != stm) return pos; // Moving no piece or opponent's piece
-    if (piece_captured != NO_PIECE && pos.color_on_sq(move.to) == stm) return pos; // Tried to capture own piece
+    if (moving_piece_packed == EMPTY_SQUARE || get_piece_color(moving_piece_packed) != stm) return pos;
+    if (pos.squares[move.to] != EMPTY_SQUARE && get_piece_color(pos.squares[move.to]) == stm) return pos;
 
     next_pos.zobrist_hash = pos.zobrist_hash;
     next_pos.pawn_zobrist_key = pos.pawn_zobrist_key;
@@ -577,6 +576,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     next_pos.piece_bb[piece_moved] &= ~from_bb;
     next_pos.color_bb[stm] &= ~from_bb;
     next_pos.halfmove_clock++;
+    next_pos.squares[move.from] = EMPTY_SQUARE;
 
     if (piece_captured != NO_PIECE) {
         next_pos.piece_bb[piece_captured] &= ~to_bb;
@@ -593,13 +593,14 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     if (piece_moved == PAWN && move.to == pos.ep_square && pos.ep_square != -1) {
         int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
+        next_pos.squares[captured_pawn_sq] = EMPTY_SQUARE;
         next_pos.piece_bb[PAWN] &= ~set_bit(captured_pawn_sq);
         next_pos.color_bb[opp] &= ~set_bit(captured_pawn_sq);
         next_pos.zobrist_hash ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
         next_pos.pawn_zobrist_key ^= zobrist_pieces[opp][PAWN][captured_pawn_sq];
     }
 
-    next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
+        next_pos.zobrist_hash ^= zobrist_ep[(pos.ep_square == -1) ? 64 : pos.ep_square];
     next_pos.ep_square = -1;
     if (piece_moved == PAWN && std::abs(move.to - move.from) == 16)
         next_pos.ep_square = (stm == WHITE) ? move.from + 8 : move.from - 8;
@@ -613,12 +614,14 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         // The moving pawn doesn't get added back to the pawn key.
         next_pos.piece_bb[move.promotion] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
+        next_pos.squares[move.to] = make_piece(move.promotion, (Color)stm);
         next_pos.zobrist_hash ^= zobrist_pieces[stm][move.promotion][move.to];
     } else {
         if (piece_moved == PAWN)
              next_pos.pawn_zobrist_key ^= zobrist_pieces[stm][PAWN][move.to];
         next_pos.piece_bb[piece_moved] |= to_bb;
         next_pos.color_bb[stm] |= to_bb;
+        next_pos.squares[move.to] = make_piece(piece_moved, (Color)stm);
         next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.to];
     }
 
@@ -641,6 +644,8 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
             next_pos.piece_bb[ROOK] |= set_bit(rook_to_sq);
             next_pos.color_bb[stm] &= ~set_bit(rook_from_sq);
             next_pos.color_bb[stm] |= set_bit(rook_to_sq);
+            next_pos.squares[rook_to_sq] = make_piece(ROOK, (Color)stm);
+            next_pos.squares[rook_from_sq] = EMPTY_SQUARE;
             next_pos.zobrist_hash ^= zobrist_pieces[stm][ROOK][rook_from_sq];
             next_pos.zobrist_hash ^= zobrist_pieces[stm][ROOK][rook_to_sq];
         }
@@ -1965,6 +1970,7 @@ void parse_fen(Position& pos, const std::string& fen_str) {
                 int sq = rank * 8 + file;
                 pos.piece_bb[p_type] |= set_bit(sq);
                 pos.color_bb[p_color] |= set_bit(sq);
+                pos.squares[sq] = make_piece(p_type, p_color);
             }
             file++;
         }
@@ -2055,7 +2061,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.58\n";
+            std::cout << "id name Amira 1.59\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
