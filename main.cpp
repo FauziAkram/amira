@@ -1586,27 +1586,11 @@ int see(const Position& pos, const Move& move) {
 // --- Move Picker (Phased Move Generation) ---
 class MovePicker {
 public:
-    MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence = false)
-        : m_pos(pos), m_ply(ply), m_tt_move(tt_move), m_prev_move(prev_move), m_quiescence_mode(quiescence) {
-        
-        m_current_idx = 0;
-        if(m_quiescence_mode) {
-             m_move_count = generate_moves(m_pos, m_moves, true);
-             for(int i=0; i<m_move_count; ++i) {
-                Piece captured = m_pos.piece_on_sq(m_moves[i].to);
-                if (captured == NO_PIECE) captured = PAWN;
-                m_moves[i].score = (see_piece_values[captured] * 100) - m_pos.piece_on_sq(m_moves[i].from);
-             }
-        } else {
-            m_move_count = generate_moves(m_pos, m_moves, false);
-            score_all_moves();
-        }
-    }
-
+    MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence = false);
     Move next_move();
 
 private:
-    void score_all_moves();
+    void score_moves();
     const Position& m_pos;
     int m_ply;
     Move m_tt_move;
@@ -1617,37 +1601,53 @@ private:
     int m_current_idx;
 };
 
-void MovePicker::score_all_moves() {
-    Move refutation = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
-    uint64_t opp_pieces = m_pos.color_bb[1-m_pos.side_to_move];
+MovePicker::MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence)
+    : m_pos(pos), m_ply(ply), m_tt_move(tt_move), m_prev_move(prev_move), m_quiescence_mode(quiescence), m_current_idx(0)
+{
+    if (quiescence) {
+        m_move_count = generate_moves(m_pos, m_moves, true); // Only captures
+        for (int i = 0; i < m_move_count; ++i) {
+            Piece captured = m_pos.piece_on_sq(m_moves[i].to);
+            if (captured == NO_PIECE) captured = PAWN; // En-passant
+            Piece moved = m_pos.piece_on_sq(m_moves[i].from);
+            m_moves[i].score = see_piece_values[captured] * 100 - see_piece_values[moved];
+        }
+    } else {
+        m_move_count = generate_moves(m_pos, m_moves, false); // All moves
+        score_moves();
+    }
+}
+
+void MovePicker::score_moves() {
+    Move killer1 = (m_ply < MAX_PLY) ? killer_moves[m_ply][0] : NULL_MOVE;
+    Move killer2 = (m_ply < MAX_PLY) ? killer_moves[m_ply][1] : NULL_MOVE;
+    Move counter = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
+    
+    uint64_t opp_pieces = m_pos.color_bb[1 - m_pos.side_to_move];
 
     for (int i = 0; i < m_move_count; ++i) {
         Move& m = m_moves[i];
-        
+
         if (m == m_tt_move) {
             m.score = 3000000;
             continue;
         }
 
         bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
-        
+
         if (is_capture || m.promotion != NO_PIECE) {
-             if (see(m_pos, m) >= 0) {
+            if (see(m_pos, m) >= 0) {
                 Piece moved = m_pos.piece_on_sq(m.from);
                 Piece captured = m_pos.piece_on_sq(m.to);
                 if (captured == NO_PIECE) captured = PAWN; // En-passant case
                 m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
-             } else
-                 m.score = -1000000; // Bad capture
+            } else
+                m.score = -1000000; // Losing capture
         } else { // Quiet moves
-            if (!refutation.is_null() && m == refutation)
-                m.score = 1000000;
-            else if (m_ply < MAX_PLY && !killer_moves[m_ply][0].is_null() && m == killer_moves[m_ply][0])
-                m.score = 900000;
-            else if (m_ply < MAX_PLY && !killer_moves[m_ply][1].is_null() && m == killer_moves[m_ply][1])
-                m.score = 800000;
-            else
-                m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
+            if (m == killer1)       m.score = 1000000;
+            else if (m == killer2)  m.score = 900000;
+            else if (m == counter)  m.score = 800000;
+            else                    m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
         }
     }
 }
@@ -1657,9 +1657,10 @@ Move MovePicker::next_move() {
         return NULL_MOVE;
 
     int best_idx = m_current_idx;
-    for (int i = m_current_idx + 1; i < m_move_count; ++i)
+    for (int i = m_current_idx + 1; i < m_move_count; ++i) {
         if (m_moves[i].score > m_moves[best_idx].score)
             best_idx = i;
+    }
 
     std::swap(m_moves[m_current_idx], m_moves[best_idx]);
     return m_moves[m_current_idx++];
@@ -2061,7 +2062,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.59\n";
+            std::cout << "id name Amira 1.6\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
