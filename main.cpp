@@ -99,6 +99,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal);
 uint64_t calculate_zobrist_hash(const Position& pos);
 uint64_t calculate_pawn_zobrist_hash(const Position& pos);
 int see(const Position& pos, const Move& move);
+uint64_t get_all_attacked_squares(const Position& pos, int color);
 
 // --- Pawn Cache ---
 struct PawnCacheEntry {
@@ -418,7 +419,7 @@ inline uint64_t get_queen_attacks(int sq, uint64_t occupied) {
     return get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
 }
 
-// --- is_square_attacked ---
+// --- is_square_attacked and helpers ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
     if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
@@ -450,6 +451,30 @@ uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occu
     attackers |= get_bishop_attacks(sq_to_check, occupied) & (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]);
     attackers |= get_rook_attacks(sq_to_check, occupied) & (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]);
     return attackers;
+}
+
+uint64_t get_all_attacked_squares(const Position& pos, int color) {
+    uint64_t attacks = 0;
+    uint64_t occupied = pos.get_occupied_bb();
+
+    for (int p_type = PAWN; p_type <= KING; ++p_type) {
+        uint64_t pieces = pos.piece_bb[p_type] & pos.color_bb[color];
+        while (pieces) {
+            int sq = lsb_index(pieces);
+            pieces &= pieces - 1;
+            
+            switch (p_type) {
+                case PAWN:   attacks |= pawn_attacks_bb[color][sq]; break;
+                case KNIGHT: attacks |= knight_attacks_bb[sq]; break;
+                case BISHOP: attacks |= get_bishop_attacks(sq, occupied); break;
+                case ROOK:   attacks |= get_rook_attacks(sq, occupied); break;
+                case QUEEN:  attacks |= get_queen_attacks(sq, occupied); break;
+                case KING:   attacks |= king_attacks_bb[sq]; break;
+                default: break;
+            }
+        }
+    }
+    return attacks;
 }
 
 // --- Move Generation ---
@@ -1463,11 +1488,11 @@ bool use_time_limits = false;
 
 // Search Heuristics
 Move killer_moves[MAX_PLY][2];
-int move_history_score[2][64][64];
+int16_t history_score[2][2][2][64][64]; // [color][from_threat][to_threat][from][to]
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
 int late_move_pruning_counts[2][MAX_PLY]; // For Late Move Pruning [improving][depth]
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
-constexpr int MAX_HISTORY_SCORE = 24000;
+constexpr int HISTORY_DIVISOR = 24000;
 constexpr int TACTICAL_LOOKAHEAD_MIN_DEPTH = 5;
 constexpr int TACTICAL_LOOKAHEAD_MARGIN = 110;
 constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
@@ -1486,7 +1511,7 @@ void reset_search_state() {
 
 void reset_search_heuristics() {
     std::memset(killer_moves, 0, sizeof(killer_moves));
-    std::memset(move_history_score, 0, sizeof(move_history_score));
+    std::memset(history_score, 0, sizeof(history_score));
     std::memset(refutation_moves, 0, sizeof(refutation_moves));
     std::memset(late_move_pruning_counts, 0, sizeof(late_move_pruning_counts));
 
@@ -1586,11 +1611,11 @@ int see(const Position& pos, const Move& move) {
 // --- Move Picker (Phased Move Generation) ---
 class MovePicker {
 public:
-    MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence = false);
+    MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, uint64_t threats, bool quiescence = false);
     Move next_move();
 
 private:
-    void score_moves();
+    void score_moves(uint64_t threats);
     const Position& m_pos;
     int m_ply;
     Move m_tt_move;
@@ -1601,7 +1626,7 @@ private:
     int m_current_idx;
 };
 
-MovePicker::MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, bool quiescence)
+MovePicker::MovePicker(const Position& pos, int ply, const Move& tt_move, const Move& prev_move, uint64_t threats, bool quiescence)
     : m_pos(pos), m_ply(ply), m_tt_move(tt_move), m_prev_move(prev_move), m_quiescence_mode(quiescence), m_current_idx(0)
 {
     if (quiescence) {
@@ -1614,11 +1639,11 @@ MovePicker::MovePicker(const Position& pos, int ply, const Move& tt_move, const 
         }
     } else {
         m_move_count = generate_moves(m_pos, m_moves, false); // All moves
-        score_moves();
+        score_moves(threats);
     }
 }
 
-void MovePicker::score_moves() {
+void MovePicker::score_moves(uint64_t threats) {
     Move killer1 = (m_ply < MAX_PLY) ? killer_moves[m_ply][0] : NULL_MOVE;
     Move killer2 = (m_ply < MAX_PLY) ? killer_moves[m_ply][1] : NULL_MOVE;
     Move counter = (m_ply > 0 && !m_prev_move.is_null()) ? refutation_moves[m_prev_move.from][m_prev_move.to] : NULL_MOVE;
@@ -1636,18 +1661,22 @@ void MovePicker::score_moves() {
         bool is_capture = get_bit(opp_pieces, m.to) || (m_pos.piece_on_sq(m.from) == PAWN && m.to == m_pos.ep_square);
 
         if (is_capture || m.promotion != NO_PIECE) {
-            if (see(m_pos, m) >= 0) {
+             if (see(m_pos, m) >= 0) {
                 Piece moved = m_pos.piece_on_sq(m.from);
                 Piece captured = m_pos.piece_on_sq(m.to);
                 if (captured == NO_PIECE) captured = PAWN; // En-passant case
                 m.score = 2000000 + (see_piece_values[captured] * 100) - see_piece_values[moved];
-            } else
-                m.score = -1000000; // Losing capture
+             } else
+                 m.score = -1000000; // Bad capture
         } else { // Quiet moves
             if (m == killer1)       m.score = 1000000;
             else if (m == killer2)  m.score = 900000;
             else if (m == counter)  m.score = 800000;
-            else                    m.score = move_history_score[m_pos.side_to_move][m.from][m.to];
+            else {
+                bool threat_from = get_bit(threats, m.from);
+                bool threat_to   = get_bit(threats, m.to);
+                m.score = history_score[m_pos.side_to_move][threat_from][threat_to][m.from][m.to];
+            }
         }
     }
 }
@@ -1682,7 +1711,8 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
         if (alpha < stand_pat_score) alpha = stand_pat_score;
     }
     
-    MovePicker picker(pos, ply, NULL_MOVE, NULL_MOVE, true);
+    uint64_t threats = get_all_attacked_squares(pos, 1 - pos.side_to_move);
+    MovePicker picker(pos, ply, NULL_MOVE, NULL_MOVE, threats, true);
     Move current_move;
     int legal_moves_in_qsearch = 0;
 
@@ -1779,11 +1809,13 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
-        // --- Tactical Lookahead Pruning ---
+    uint64_t threats = get_all_attacked_squares(pos, 1 - pos.side_to_move);
+
+    // --- Tactical Lookahead Pruning ---
     if (!is_pv_node && !in_check && depth >= TACTICAL_LOOKAHEAD_MIN_DEPTH && std::abs(beta) < MATE_THRESHOLD) {
         int raised_beta = beta + TACTICAL_LOOKAHEAD_MARGIN;
 
-        MovePicker tactical_picker(pos, ply, NULL_MOVE, NULL_MOVE, true);
+        MovePicker tactical_picker(pos, ply, NULL_MOVE, NULL_MOVE, threats, true);
         Move tactical_move;
         while (!(tactical_move = tactical_picker.next_move()).is_null()) {
             // Prune moves that are unlikely to raise alpha significantly. We use SEE to estimate this.
@@ -1808,7 +1840,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         }
     }
 
-    MovePicker picker(pos, ply, tt_move, prev_move);
+    MovePicker picker(pos, ply, tt_move, prev_move, threats);
     Move current_move;
     int legal_moves_played = 0;
     Move best_move_found = NULL_MOVE;
@@ -1902,15 +1934,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                             refutation_moves[prev_move.from][prev_move.to] = current_move;
 
                         // History Heuristic Update
+                        auto update = [&](int16_t& h, int b) {
+                            h += b - (h * std::abs(b) / HISTORY_DIVISOR);
+                        };
+                        
                         int bonus = depth * depth;
-                        int& good_hist = move_history_score[pos.side_to_move][current_move.from][current_move.to];
-                        good_hist += bonus - (good_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
-
+                        bool threat_from = get_bit(threats, current_move.from);
+                        bool threat_to   = get_bit(threats, current_move.to);
+                        update(history_score[pos.side_to_move][threat_from][threat_to][current_move.from][current_move.to], bonus);
+                        
                         // Penalize the quiet moves that came before this one
                         for (const Move& bad_move : quiet_moves_for_history) {
                              if(bad_move == current_move) continue;
-                             int& bad_hist = move_history_score[pos.side_to_move][bad_move.from][bad_move.to];
-                             bad_hist -= bonus - (bad_hist * std::abs(bonus) / MAX_HISTORY_SCORE);
+                             bool bad_threat_from = get_bit(threats, bad_move.from);
+                             bool bad_threat_to   = get_bit(threats, bad_move.to);
+                             update(history_score[pos.side_to_move][bad_threat_from][bad_threat_to][bad_move.from][bad_move.to], -bonus);
                         }
                     }
                     store_tt(pos.zobrist_hash, depth, ply, beta, TT_LOWER, best_move_found, static_eval);
@@ -2062,7 +2100,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.6\n";
+            std::cout << "id name Amira 1.61\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
