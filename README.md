@@ -6,10 +6,9 @@
 
 ## Description
 
-Amira is a UCI (Universal Chess Interface) chess engine written entirely in a single C++ file. It began as a simple engine and has evolved to include a sophisticated evaluation function and advanced search algorithms, significantly boosting its playing strength. The project's core philosophy remains: create a strong, dependency-free engine that is understandable and contained within a single file.
+Amira is a UCI (Universal Chess Interface) chess engine written entirely in a single C++ file (Might be divided into multiple files soon). It began as a simple engine and has evolved to include a sophisticated evaluation function and advanced search algorithms, significantly boosting its playing strength. The project's core philosophy remains: create a strong, dependency-free engine that is understandable and contained within a single file.
 
-This engine was developed as an exercise in creating a competitive chess program, using the Vibe-Coding methodology with Gemini 2.5 Pro for both its initial creation and subsequent enhancements.
-
+This engine is the result of a collaborative effort between human and LLM, developed as an exercise in creating a competitive chess program from its initial creation to its subsequent enhancements. While the single-file structure has been a core part of its identity, this constraint may be lifted in future versions to facilitate more complex development.
 ## YouTube
 
 The original episode where Amira was created is part of the "Coding a Chess Engine" series on the ChessTubeTree channel. Watch the first episode here:
@@ -32,14 +31,16 @@ The original episode where Amira was created is part of the "Coding a Chess Engi
 *   **Transposition Table (TT):** Caches search results to avoid re-calculating known positions.
 *   **Advanced Pruning Techniques:**
     *   Null Move Pruning (NMP)
-    *   Late Move Reductions (LMR) with adaptive reduction amounts.
+    *   Late Move Reductions (LMR) with adaptive, table-driven reduction amounts.
     *   Reverse Futility Pruning (RFP)
     *   Razoring
+    *   Tactical Lookahead Pruning
     *   Check Extensions
 *   **Advanced Move Ordering:**
     *   TT Move (PV Move)
-    *   MVV-LVA (Most Valuable Victim - Least Valuable Aggressor) for captures.
+    *   Static Exchange Evaluation (SEE) based capture ordering.
     *   Killer Moves (two per ply).
+    *   Counter-Move Heuristic.
     *   History Heuristic for quiet moves.
 
 ### Evaluation Function
@@ -56,9 +57,11 @@ The evaluation is tapered, blending middlegame (MG) and endgame (EG) scores base
 *   **King Safety:**
     *   **Pawn Shield:** Evaluates the pawn cover in front of a castled (or non-castled) king.
     *   **King Attack Score:** A penalty system based on the number and type of enemy pieces attacking the king's zone.
-*   **Tactical Awareness:**
-    *   Bonuses for minor pieces attacking enemy heavy pieces.
-    *   Bonuses for rooks attacking enemy minor pieces.
+*   **Threat Evaluation:** A dedicated module to reward tactical opportunities, including:
+    *   Attacks on weak, hanging, or under-defended pieces.
+    *   Bonuses for safe pawn attacks on enemy pieces.
+    *   Recognition of pawn push threats that create tactical problems for the opponent.
+*   **Endgame Scaling:** The evaluation is scaled in endgames to better recognize drawish positions, such as those with opposite-colored bishops or a minimal material advantage.
 *   **Tempo Bonus:** A small bonus for the side to move.
 
 ### Game Rules & Time Management
@@ -95,11 +98,11 @@ You can now select Amira to play against or to analyze positions. The engine sup
 Project Goals
 Strength: Continuously improve playing strength by implementing modern and effective chess programming techniques.
 Correctness: Always play legal moves and correctly adhere to all chess rules and the UCI protocol.
-Simplicity of Form: Maintain the entire C++ codebase within a single, dependency-free file.
+Simplicity: Maintain a clean and understandable codebase. While historically this has meant keeping the engine in a single file, this constraint may be lifted in the future to allow for easier expansion.
 Reliability: Always return a valid move within the allocated time.
 
 Constraints
-Single-File: All C++ code is in main.cpp.
+Single-File: Currently, all C++ code is in `main.cpp`. This may change in a future release to improve modularity.
 No NNUE: Does not use a Neural Network-based evaluation.
 No External Dependencies: Relies only on standard C++ libraries.
 g++ Compatible: Must compile cleanly with g++.
