@@ -1858,6 +1858,21 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         // Cache if the move is quiet using fast bitboard checks
         bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
 
+        // --- Static Exchange Evaluation (SEE) Pruning ---
+        // If a move is unlikely to win material, we can prune it at shallow depths.
+        // This is especially effective for moves with low scores from the move picker.
+        if ( !is_pv_node && depth <= 8 && best_score > -MATE_THRESHOLD )
+        {
+            // Define aggressive margins that become stricter at deeper depths.
+            int see_margin = is_quiet ? -80 * depth
+                                      : -30 * depth * depth;
+
+            // Prune the move if its SEE value is below the margin.
+            if (see(pos, current_move) < see_margin) {
+                continue;
+            }
+        }
+
         legal_moves_played++;
         int score;
         bool is_repetition = false;
@@ -2100,7 +2115,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.61\n";
+            std::cout << "id name Amira 1.62\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
