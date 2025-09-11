@@ -809,6 +809,7 @@ const PhaseScore TEMPO_BONUS                   = {15, 15};
 const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
 const PhaseScore PAWN_CONNECTED_BONUS          = {10, 16};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
+const PhaseScore CANDIDATE_PAWN_BONUS          = {4, 8};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
 const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
 const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
@@ -843,6 +844,7 @@ const int SHIELD_PAWN_PRESENT_BONUS = 10;
 const int SHIELD_PAWN_MISSING_PENALTY = -20;
 const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
 const int SHIELD_OPEN_FILE_PENALTY = -15;
+const int SHIELD_ATTACKING_HEAVY_PIECE_PENALTY = -25;
 const int SafetyKnightWeight    = 32;
 const int SafetyBishopWeight    = 19;
 const int SafetyRookWeight      = 27;
@@ -986,6 +988,15 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
             passed_pawns |= set_bit(sq);
             int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
             pawn_score += passed_pawn_bonus[rank_from_own_side];
+        } else {
+            // Candidate Passed Pawn
+            uint64_t path_ahead_on_file = white_passed_pawn_block_mask[sq] & file_bb_mask[f];
+            if (current_eval_color == BLACK) {
+                path_ahead_on_file = black_passed_pawn_block_mask[sq] & file_bb_mask[f];
+            }
+            if ((path_ahead_on_file & all_enemy_pawns) == 0) {
+                pawn_score += CANDIDATE_PAWN_BONUS;
+            }
         }
     }
 }
@@ -1312,8 +1323,14 @@ int evaluate(Position& pos) {
                     uint64_t friendly_pawns_on_file = file_bb_mask[f] & all_friendly_pawns;
                     if (!friendly_pawns_on_file) {
                         shelter_score += SHIELD_PAWN_MISSING_PENALTY;
-                        if (!(file_bb_mask[f] & all_enemy_pawns))
+                        if (!(file_bb_mask[f] & all_enemy_pawns)) {
                             shelter_score += SHIELD_OPEN_FILE_PENALTY;
+                            // Penalty for enemy heavy pieces on the open file
+                            uint64_t enemy_heavy_pieces = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[enemy_color];
+                            if ((file_bb_mask[f] & enemy_heavy_pieces) != 0) {
+                                shelter_score += SHIELD_ATTACKING_HEAVY_PIECE_PENALTY;
+                            }
+                        }
                     } else {
                         bool pawn_on_shield_rank_1 = get_bit(friendly_pawns_on_file, shield_rank_1 * 8 + f);
                         bool pawn_on_shield_rank_2 = (shield_rank_2 >= 0 && shield_rank_2 < 8) ? get_bit(friendly_pawns_on_file, shield_rank_2 * 8 + f) : false;
@@ -1496,6 +1513,9 @@ constexpr int HISTORY_DIVISOR = 24000;
 constexpr int TACTICAL_LOOKAHEAD_MIN_DEPTH = 5;
 constexpr int TACTICAL_LOOKAHEAD_MARGIN = 110;
 constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
+constexpr int PROBCUT_MARGIN = 190;
+constexpr int PROBCUT_MIN_DEPTH = 6;
+
 
 // Repetition Detection Data Structures
 uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
@@ -1809,6 +1829,20 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
     }
 
+    // ProbCut Pruning
+    if (!is_pv_node && !in_check && depth >= PROBCUT_MIN_DEPTH && std::abs(beta) < MATE_THRESHOLD) {
+        if (static_eval + PROBCUT_MARGIN <= alpha) {
+            int probcut_score = search(pos, depth - 4, alpha - PROBCUT_MARGIN -1, alpha - PROBCUT_MARGIN, ply, false, true, prev_move);
+            if (probcut_score <= alpha - PROBCUT_MARGIN)
+                return alpha;
+        } else if (static_eval - PROBCUT_MARGIN >= beta) {
+            int probcut_score = search(pos, depth - 4, beta + PROBCUT_MARGIN -1, beta + PROBCUT_MARGIN, ply, false, true, prev_move);
+            if (probcut_score >= beta + PROBCUT_MARGIN)
+                return beta;
+        }
+    }
+
+
     uint64_t threats = get_all_attacked_squares(pos, 1 - pos.side_to_move);
 
     // --- Tactical Lookahead Pruning ---
@@ -1857,6 +1891,17 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Cache if the move is quiet using fast bitboard checks
         bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
+        
+        // Futility Pruning
+        if (is_quiet && !in_check && best_score > -MATE_THRESHOLD) {
+            if (depth <= 3) {
+                int futility_margins[4] = {0, 125, 275, 450}; // Margins for depth 1, 2, 3
+                if (static_eval + futility_margins[depth] < alpha) {
+                    continue; // Prune this quiet move
+                }
+            }
+        }
+
 
         // --- Static Exchange Evaluation (SEE) Pruning ---
         // If a move is unlikely to win material, we can prune it at shallow depths.
@@ -2115,7 +2160,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.62\n";
+            std::cout << "id name Amira 1.70\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2243,49 +2288,49 @@ void uci_loop() {
 
             reset_search_state();
             search_start_timepoint = std::chrono::steady_clock::now();
-
+            
+            // --- Context-Aware Time Management ---
+            long long allocated_time_ms = 0;
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
 
             if (my_time != -1) {
                 use_time_limits = true;
-
-                if (my_inc > 0) {
-                    // --- INCREMENT TIME CONTROL ---
-                    double soft_limit_s = my_time * 0.000052;
-                    double hard_limit_s = my_time * 0.00041;
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
+                int divisor = 40; // Default moves per game
+                if (movestogo > 0) {
+                    divisor = movestogo + 2; // Leave a small buffer
                 } else {
-                    // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
-                    int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
-                    long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
-                    allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
-                    if (allocated_time_ms >= my_time)
-                        allocated_time_ms = my_time - 100; // Leave 100ms
-                    if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
+                    // Estimate moves left based on game phase. Use more time in complex middlegames.
+                    int total_pieces = pop_count(uci_root_pos.get_occupied_bb());
+                    if (total_pieces > 22) divisor = 45; // Opening
+                    else if (total_pieces > 10) divisor = 35; // Middlegame
+                    else divisor = 40; // Endgame
                 }
-            } else
+
+                allocated_time_ms = my_time / divisor;
+                
+                // Add a portion of the increment
+                allocated_time_ms += my_inc * 3 / 4;
+
+                // Don't use more than a large fraction of the total time
+                allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
+            } else {
                 use_time_limits = false;
+            }
+
+            long long soft_limit_ms = allocated_time_ms;
+            long long hard_limit_ms = use_time_limits ? (my_time * 8 / 10) : 0;
+            if(use_time_limits) {
+                soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
+            }
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
+            int last_iter_score = 0;
+            Move last_iter_best_move = NULL_MOVE;
+            int move_stability_counter = 0;
+
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
             int aspiration_window_delta = 15;
@@ -2361,6 +2406,28 @@ void uci_loop() {
                     }
                 }
                 std::cout << std::endl;
+
+                // --- Time Management Decisions ---
+                if (use_time_limits && depth >= 4) {
+                    // Panic: score dropped significantly, extend time
+                    if (depth > 1 && best_score_overall < last_iter_score - 70) {
+                        soft_limit_ms = soft_limit_ms * 3 / 2;
+                        soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    }
+                    // Confidence: best move is stable and much better
+                    if (uci_best_move_overall == last_iter_best_move) {
+                        move_stability_counter++;
+                    } else {
+                        move_stability_counter = 0;
+                    }
+                    // After 2 stable iterations, we can consider stopping if time is tight
+                    if (move_stability_counter >= 2 && elapsed_ms * 2 > soft_limit_ms) {
+                         break;
+                    }
+                }
+                last_iter_score = best_score_overall;
+                last_iter_best_move = uci_best_move_overall;
+
 
                 if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint)
                     break;
