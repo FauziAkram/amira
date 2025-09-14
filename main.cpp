@@ -2124,7 +2124,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.63\n";
+            std::cout << "id name Amira 1.64\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2255,16 +2255,17 @@ void uci_loop() {
 
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
+            long long soft_limit_ms = 0;
 
             if (my_time != -1) {
                 use_time_limits = true;
 
                 if (my_inc > 0) {
                     // --- INCREMENT TIME CONTROL ---
-                    double soft_limit_s = my_time * 0.000052;
-                    double hard_limit_s = my_time * 0.00041;
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(soft_limit_s * 1000000.0));
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::microseconds(static_cast<long long>(hard_limit_s * 1000000.0));
+                    soft_limit_ms = static_cast<long long>(my_time * 0.052);
+                    long long hard_limit_ms = static_cast<long long>(my_time * 0.41);
+                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
                 } else {
                     // --- SUDDEN DEATH TIME CONTROL ---
                     // This logic aims to use a fraction of the remaining time.
@@ -2286,9 +2287,9 @@ void uci_loop() {
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
                     
                     // For simplicity, we use the same time for both soft and hard limits.
-                    // The soft limit stops iterative deepening, the hard limit is a final kill switch.
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
+                    soft_limit_ms = allocated_time_ms;
+                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                 }
             } else
                 use_time_limits = false;
@@ -2298,6 +2299,9 @@ void uci_loop() {
             int aspiration_alpha = -INF_SCORE;
             int aspiration_beta = INF_SCORE;
             int aspiration_window_delta = 15;
+            int last_iter_score = 0;
+            Move last_iter_best_move = NULL_MOVE;
+            int move_stability_counter = 0;
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
@@ -2370,6 +2374,27 @@ void uci_loop() {
                     }
                 }
                 std::cout << std::endl;
+
+                // --- Time Management Decisions ---
+                if (use_time_limits && depth >= 4) {
+                    // Panic: score dropped significantly, extend time
+                    if (depth > 1 && best_score_overall < last_iter_score - 70) {
+                        soft_limit_ms = soft_limit_ms * 3 / 2;
+                        soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    }
+                    // Confidence: best move is stable and much better
+                    if (uci_best_move_overall == last_iter_best_move) {
+                        move_stability_counter++;
+                    } else {
+                        move_stability_counter = 0;
+                    }
+                    // After 2 stable iterations, we can consider stopping if time is tight
+                    if (move_stability_counter >= 2 && elapsed_ms * 2 > soft_limit_ms) {
+                         break;
+                    }
+                }
+                last_iter_score = best_score_overall;
+                last_iter_best_move = uci_best_move_overall;
 
                 if (use_time_limits && std::chrono::steady_clock::now() > soft_limit_timepoint)
                     break;
