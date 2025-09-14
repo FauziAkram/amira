@@ -1857,6 +1857,15 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Cache if the move is quiet using fast bitboard checks
         bool is_quiet = !(get_bit(opp_pieces, current_move.to) || (current_move.to == pos.ep_square && get_bit(friendly_pawns, current_move.from))) && current_move.promotion == NO_PIECE;
+        
+        // Futility Pruning
+        if (is_quiet && !in_check && best_score > -MATE_THRESHOLD) {
+            if (depth <= 3) {
+                int futility_margins[4] = {0, 125, 275, 450}; // Margins for depth 1, 2, 3
+                if (static_eval + futility_margins[depth] < alpha)
+                    continue; // Prune this quiet move
+            }
+        }
 
         // --- Static Exchange Evaluation (SEE) Pruning ---
         // If a move is unlikely to win material, we can prune it at shallow depths.
@@ -2115,7 +2124,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.62\n";
+            std::cout << "id name Amira 1.63\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2407,3 +2416,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
