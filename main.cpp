@@ -807,7 +807,6 @@ const PhaseScore passed_pawn_bonus[8] = {
 // --- Evaluation Constants ---
 const PhaseScore TEMPO_BONUS                   = {15, 15};
 const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
-const PhaseScore PAWN_CONNECTED_BONUS          = {10, 16};
 const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
 const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
@@ -821,7 +820,8 @@ const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
 const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
 const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
 const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-const PhaseScore ROOK_ON_SEVENTH_BONUS         = {12, 39};
+const PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
+const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
 const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
 const PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
@@ -835,7 +835,16 @@ const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
 const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
 const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
 const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
-
+const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 7, 12}, {20, 20}, {37, 46}, {78, 104}, { 0, 0}},
+    {{ 0, 0}, { 2, 4}, { 4, 7}, {12, 12}, {26, 20}, {42, 46}, {84, 104}, { 0, 0}},
+    {{ 0, 0}, { 2, 4}, { 4, 7}, {12, 12}, {26, 20}, {42, 46}, {84, 104}, { 0, 0}},
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 7, 12}, {20, 20}, {37, 46}, {78, 104}, { 0, 0}},
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
+    {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}}
+};
 
 // --- Evaluation Constants for King Safety ---
 // King Shelter Penalties (Middlegame only)
@@ -953,16 +962,17 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
             pawn_score += PROTECTED_PAWN_BONUS;
         }
-
-        // Connected Pawn (Phalanx) Bonus
-        if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
-            pawn_score += PAWN_CONNECTED_BONUS;
-        }
         
         // Doubled Pawn Evaluation
         uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
         if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
             pawn_score += DOUBLED_PAWN_PENALTY;
+        }
+
+        // Connected Pawn (Phalanx) Bonus
+        if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
+            int rank_idx = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
+            pawn_score += PhalanxPawnBonus[f][rank_idx];
         }
         
         // Backward Pawn Evaluation
@@ -1259,8 +1269,14 @@ int evaluate(Position& pos) {
                         if (!enemy_pawn_on_file) current_color_score += ROOK_ON_OPEN_FILE; 
                         else current_color_score += ROOK_ON_SEMI_OPEN_FILE;
                     }
-                    int relative_rank = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-                    if (relative_rank == 6) current_color_score += ROOK_ON_SEVENTH_BONUS;
+                    int rank = sq / 8;
+                    int seventh_rank = (current_eval_color == WHITE) ? 6 : 1;
+                    int eighth_rank = (current_eval_color == WHITE) ? 7 : 0;
+                    if (rank == seventh_rank && (get_bit(pos.piece_bb[KING] & enemy_pieces, eighth_rank * 8 + file_of(king_sq)) || (pos.piece_bb[PAWN] & enemy_pieces & rank_bb_mask[rank]))) {
+                        current_color_score += RookOnEnemyTerritoryBonus;
+                        if (get_rook_attacks(sq, occupied) & (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & friendly_pieces)
+                            current_color_score += ConnectedRooksOnTerritoryBonus;
+                    }
                 }
                 else if ((Piece)p == KNIGHT || (Piece)p == BISHOP) {
                     int rank = sq / 8;
