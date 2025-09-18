@@ -172,6 +172,41 @@ std::string move_to_uci(const Move& move) {
     return uci_move_str;
 }
 
+// --- Board Representation ---
+struct Position {
+    uint8_t squares[64];
+    uint64_t piece_bb[6];
+    uint64_t color_bb[2];
+    int side_to_move;
+    int ep_square;
+    uint8_t castling_rights;
+    uint64_t zobrist_hash;
+    uint64_t pawn_zobrist_key; // For pawn cache
+    int halfmove_clock;
+    int fullmove_number;
+    int ply;
+    int static_eval; // Store the last evaluation for dynamic LMR
+
+    Position() : side_to_move(WHITE), ep_square(-1), castling_rights(0),
+                 zobrist_hash(0), pawn_zobrist_key(0), halfmove_clock(0),
+                 fullmove_number(1), ply(0), static_eval(0)
+    {
+        std::memset(squares, EMPTY_SQUARE, sizeof(squares));
+        std::memset(piece_bb, 0, sizeof(piece_bb));
+        std::memset(color_bb, 0, sizeof(color_bb));
+    }
+    uint64_t get_occupied_bb() const { return color_bb[WHITE] | color_bb[BLACK]; }
+
+    Piece piece_on_sq(int sq) const {
+        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_PIECE;
+        return get_piece_type(squares[sq]);
+    }
+    Color color_on_sq(int sq) const {
+        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_COLOR;
+        return get_piece_color(squares[sq]);
+    }
+};
+
 // --- Bitboard Utilities ---
 inline uint64_t set_bit(int sq) { return 1ULL << sq; }
 inline bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
@@ -207,41 +242,6 @@ uint64_t nw(uint64_t b) { return north(west(b)); }
 uint64_t ne(uint64_t b) { return north(east(b)); }
 uint64_t sw(uint64_t b) { return south(west(b)); }
 uint64_t se(uint64_t b) { return south(east(b)); }
-
-// --- Board Representation ---
-struct Position {
-    uint8_t squares[64];
-    uint64_t piece_bb[6];
-    uint64_t color_bb[2];
-    int side_to_move;
-    int ep_square;
-    uint8_t castling_rights;
-    uint64_t zobrist_hash;
-    uint64_t pawn_zobrist_key; // For pawn cache
-    int halfmove_clock;
-    int fullmove_number;
-    int ply;
-    int static_eval; // Store the last evaluation for dynamic LMR
-
-    Position() : side_to_move(WHITE), ep_square(-1), castling_rights(0),
-                 zobrist_hash(0), pawn_zobrist_key(0), halfmove_clock(0),
-                 fullmove_number(1), ply(0), static_eval(0)
-    {
-        std::memset(squares, EMPTY_SQUARE, sizeof(squares));
-        std::memset(piece_bb, 0, sizeof(piece_bb));
-        std::memset(color_bb, 0, sizeof(color_bb));
-    }
-    uint64_t get_occupied_bb() const { return color_bb[WHITE] | color_bb[BLACK]; }
-
-    Piece piece_on_sq(int sq) const {
-        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_PIECE;
-        return get_piece_type(squares[sq]);
-    }
-    Color color_on_sq(int sq) const {
-        if (sq < 0 || sq >= 64 || squares[sq] == EMPTY_SQUARE) return NO_COLOR;
-        return get_piece_color(squares[sq]);
-    }
-};
 
 // --- Attack Tables Init ---
 uint64_t pawn_attacks_bb[2][64];
@@ -2457,3 +2457,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
