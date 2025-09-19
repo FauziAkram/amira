@@ -233,6 +233,8 @@ inline int lsb_index(uint64_t bb) {
 #endif
 }
 inline int file_of(int sq) { return sq % 8; }
+inline int rank_of(int sq) { return sq / 8; }
+inline int relative_rank(int sq, Color color) { return rank_of(sq) ^ (color * 7); }
 
 uint64_t north(uint64_t b) { return b << 8; }
 uint64_t south(uint64_t b) { return b >> 8; }
@@ -822,7 +824,16 @@ const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
 const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
 const PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
 const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-const int passed_pawn_enemy_king_dist_bonus_eg = 4; // bonus per square of Chebyshev distance in endgame
+const int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
+const int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
+const PhaseScore PasserBlockedBonus[2][8] = {
+    {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
+    {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
+};
+const PhaseScore PasserUnsafeBonus[2][8] = {
+    {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
+    {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
+};
 const PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
@@ -1217,18 +1228,27 @@ int evaluate(Position& pos) {
                 current_color_score += piece_phase_values[p];
                 current_color_score += pst_all[p][mirrored_sq];
 
-                if ((Piece)p == PAWN) {
-                    uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
-                    if (get_bit(current_passed_pawns, sq)) {
-                        int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
-                        if (enemy_king_sq != -1) {
-                            int pawn_rank = sq / 8; int pawn_file = sq % 8;
-                            int king_rank = enemy_king_sq / 8; int king_file = enemy_king_sq % 8;
-                            int dist_to_enemy_king = std::max(std::abs(pawn_rank - king_rank), std::abs(pawn_file - king_file));
-                            current_color_score.eg += dist_to_enemy_king * passed_pawn_enemy_king_dist_bonus_eg;
-                        }
-                    }
-                } else if ((Piece)p != KING) { // Mobility for non-king pieces
+                 if ((Piece)p == PAWN) {
+                     uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
+                     if (get_bit(current_passed_pawns, sq)) {
+                         int rank = relative_rank(sq, current_eval_color);
+                         int enemy_king_sq = lsb_index(pos.piece_bb[KING] & enemy_pieces);
+                         if (enemy_king_sq != -1) {
+                            int pawn_file = file_of(sq);
+                            int my_king_file = file_of(king_sq);
+                            int enemy_king_file = file_of(enemy_king_sq);
+
+                            current_color_score.eg -= PasserMyKingDistance[rank] * std::max(std::abs(rank_of(sq) - rank_of(king_sq)), std::abs(pawn_file - my_king_file));
+                            current_color_score.eg += PasserEnemyKingDistance[rank] * std::max(std::abs(rank_of(sq) - rank_of(enemy_king_sq)), std::abs(pawn_file - enemy_king_file));
+                         }
+
+                         bool is_blocked = get_bit(occupied, (current_eval_color == WHITE) ? sq + 8 : sq - 8);
+                         bool is_unsafe = get_bit(attackedBy[enemy_color][6], (current_eval_color == WHITE) ? sq + 8 : sq - 8);
+
+                         current_color_score += PasserBlockedBonus[is_blocked][rank];
+                         current_color_score += PasserUnsafeBonus[is_unsafe][rank];
+                     }
+                 } else if ((Piece)p != KING) { // Mobility for non-king pieces
                     uint64_t mobility_attacks = 0;
                     if ((Piece)p == KNIGHT) mobility_attacks = knight_attacks_bb[sq];
                     else if ((Piece)p == BISHOP) mobility_attacks = get_bishop_attacks(sq, occupied);
@@ -2140,7 +2160,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.65\n";
+            std::cout << "id name Amira 1.66\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
