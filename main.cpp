@@ -9,7 +9,6 @@
 #include <random>   // For std::mt19937_64
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::log
-#include <functional> // For std::partition
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -713,7 +712,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     next_pos.ply = pos.ply + 1;
 
     int king_sq_after_move = lsb_index(next_pos.piece_bb[KING] & next_pos.color_bb[stm]); // King of the side that just MOVED
-    if (king_sq_after_move == -1) { /* Should not happen */ return pos; }
     if (is_square_attacked(next_pos, king_sq_after_move, opp)) // Check if own king is attacked by opponent
         return pos; // Illegal move, king left in check
 
@@ -2160,7 +2158,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.66\n";
+            std::cout << "id name Amira 1.67\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2337,7 +2335,6 @@ void uci_loop() {
             int aspiration_window_delta = 15;
             int last_iter_score = 0;
             Move last_iter_best_move = NULL_MOVE;
-            int move_stability_counter = 0;
 
             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
@@ -2418,14 +2415,8 @@ void uci_loop() {
                         soft_limit_ms = soft_limit_ms * 3 / 2;
                         soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     }
-                    // Confidence: best move is stable and much better
-                    if (uci_best_move_overall == last_iter_best_move) {
-                        move_stability_counter++;
-                    } else {
-                        move_stability_counter = 0;
-                    }
-                    // After 2 stable iterations, we can consider stopping if time is tight
-                    if (move_stability_counter >= 2 && elapsed_ms * 2 > soft_limit_ms) {
+                    // Confidence: if the best move is stable for a few iterations, we can consider stopping early.
+                    if (uci_best_move_overall == last_iter_best_move && elapsed_ms * 2 > soft_limit_ms) {
                          break;
                     }
                 }
