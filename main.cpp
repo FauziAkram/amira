@@ -1752,6 +1752,8 @@ int quiescence_search(Position& pos, int alpha, int beta, int ply) {
 
     while (!(current_move = picker.next_move()).is_null()) {
         if (!in_check) {
+            Piece captured_type = pos.piece_on_sq(current_move.to);
+            if (stand_pat_score + see_piece_values[captured_type] + 200 < alpha) continue;
             if (see(pos, current_move) < 0) continue;
         }
 
@@ -2158,7 +2160,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.67\n";
+            std::cout << "id name Amira 1.68\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2468,3 +2470,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
