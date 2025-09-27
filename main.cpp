@@ -1812,7 +1812,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 182 + 78 * (depth-1);
+            int razoring_margin = 182 + 78 * depth;
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
@@ -2160,7 +2160,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.68\n";
+            std::cout << "id name Amira 1.69\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2470,4 +2470,5 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
 
