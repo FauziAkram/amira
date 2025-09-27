@@ -2246,99 +2246,101 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
-            if (!g_tt_is_initialized) {
-                init_tt(g_configured_tt_size_mb);
-                g_tt_is_initialized = true;
-            }
-
-            Move root_pseudo_moves[256];
-            int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
-            std::vector<Move> root_legal_moves;
-            for (int i = 0; i < num_pseudo_moves; ++i) {
-                const Move& m = root_pseudo_moves[i];
-                bool is_legal_flag;
-                make_move(uci_root_pos, m, is_legal_flag);
-                if (is_legal_flag)
-                    root_legal_moves.push_back(m);
-            }
-
-            if (root_legal_moves.size() == 1) {
-                std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
-                continue;
-            }
-            if (root_legal_moves.empty()) {
-                std::cout << "bestmove 0000" << std::endl;
-                continue;
-            }
-
-            // --- Time Control Parsing ---
-            long long wtime = -1, btime = -1, winc = 0, binc = 0;
-            int movestogo = 0;
-            int max_depth_to_search = MAX_PLY;
-
-            std::string go_param;
-            while(ss >> go_param) {
-                if (go_param == "wtime") ss >> wtime;
-                else if (go_param == "btime") ss >> btime;
-                else if (go_param == "winc") ss >> winc;
-                else if (go_param == "binc") ss >> binc;
-                else if (go_param == "movestogo") ss >> movestogo;
-                else if (go_param == "depth") ss >> max_depth_to_search;
-            }
-
-            reset_search_state();
-            search_start_timepoint = std::chrono::steady_clock::now();
-
-            long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
-            long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
-            long long soft_limit_ms = 0;
-
-            if (my_time != -1) {
-                use_time_limits = true;
-
-                if (my_inc > 0) {
-                    // --- INCREMENT TIME CONTROL ---
-                    soft_limit_ms = static_cast<long long>(my_time * 0.052);
-                    long long hard_limit_ms = static_cast<long long>(my_time * 0.41);
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
-                } else {
-                    // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
-                    int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
-                    long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
-                    allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
-                    if (allocated_time_ms >= my_time)
-                        allocated_time_ms = my_time - 100; // Leave 100ms
-                    if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    soft_limit_ms = allocated_time_ms;
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                }
-            } else
-                use_time_limits = false;
-
-            uci_best_move_overall = NULL_MOVE;
-            int best_score_overall = 0;
-            int aspiration_alpha = -INF_SCORE;
-            int aspiration_beta = INF_SCORE;
-            int aspiration_window_delta = 15;
-            int last_iter_score = 0;
-            Move last_iter_best_move = NULL_MOVE;
-
-            for (int depth = 1; depth <= max_depth_to_search; ++depth) {
+             if (!g_tt_is_initialized) {
+                 init_tt(g_configured_tt_size_mb);
+                 g_tt_is_initialized = true;
+             }
+ 
+             Move root_pseudo_moves[256];
+             int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
+             std::vector<Move> root_legal_moves;
+             for (int i = 0; i < num_pseudo_moves; ++i) {
+                 const Move& m = root_pseudo_moves[i];
+                 bool is_legal_flag;
+                 make_move(uci_root_pos, m, is_legal_flag);
+                 if (is_legal_flag)
+                     root_legal_moves.push_back(m);
+             }
+ 
+             if (root_legal_moves.size() == 1) {
+                 std::cout << "bestmove " << move_to_uci(root_legal_moves[0]) << std::endl;
+                 continue;
+             }
+             if (root_legal_moves.empty()) {
+                 std::cout << "bestmove 0000" << std::endl;
+                 continue;
+             }
+ 
+             // --- Time Control Parsing ---
+             long long wtime = -1, btime = -1, winc = 0, binc = 0;
+             int movestogo = 0;
+             int max_depth_to_search = MAX_PLY;
+ 
+             std::string go_param;
+             while(ss >> go_param) {
+                 if (go_param == "wtime") ss >> wtime;
+                 else if (go_param == "btime") ss >> btime;
+                 else if (go_param == "winc") ss >> winc;
+                 else if (go_param == "binc") ss >> binc;
+                 else if (go_param == "movestogo") ss >> movestogo;
+                 else if (go_param == "depth") ss >> max_depth_to_search;
+             }
+ 
+             reset_search_state();
+             search_start_timepoint = std::chrono::steady_clock::now();
+ 
+             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
+             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
+             long long soft_limit_ms = 0;
+             long long hard_limit_ms = 0;
+ 
+             // From Engine 2: A small buffer to account for communication overhead.
+             const long long Amira_Latency_Buffer_ms = 10;
+ 
+             if (my_time != -1) {
+                 use_time_limits = true;
+ 
+                 // --- Engine 2 Time Management Logic ---
+                 double amira_ideal_time_ratio, amira_max_time_multiplier;
+                 int current_ply = (uci_root_pos.fullmove_number - 1) * 2 + (uci_root_pos.side_to_move == BLACK);
+ 
+                 int centi_moves_to_go = (movestogo > 0) ? std::min(movestogo * 100, 5000) : 5051;
+                 if (my_time < 1000)
+                     centi_moves_to_go = my_time * 5.051;
+ 
+                 long long amira_projected_time_pool = std::max(1LL, my_time + (my_inc * (centi_moves_to_go - 100) - Amira_Latency_Buffer_ms * (200 + centi_moves_to_go)) / 100);
+ 
+                 if (movestogo == 0) {
+                     double log_time_sec = std::log10(std::max(1.0, (double)my_time / 1000.0));
+                     double opt_constant = std::min(0.0032116 + 0.000321123 * log_time_sec, 0.00508017);
+                     double max_constant = std::max(3.3977 + 3.03950 * log_time_sec, 2.94761);
+                     amira_ideal_time_ratio = std::min(0.0121431 + std::pow(current_ply + 2.94693, 0.461073) * opt_constant, 0.213035 * my_time / amira_projected_time_pool);
+                     amira_max_time_multiplier = std::min(6.67704, max_constant + current_ply / 11.9847);
+                 } else {
+                     amira_ideal_time_ratio = std::min((0.88 + current_ply / 116.4) / (centi_moves_to_go / 100.0), 0.88 * my_time / amira_projected_time_pool);
+                     amira_max_time_multiplier = 1.3 + 0.11 * (centi_moves_to_go / 100.0);
+                 }
+ 
+                 soft_limit_ms = static_cast<long long>(amira_ideal_time_ratio * amira_projected_time_pool);
+                 hard_limit_ms = static_cast<long long>(std::min(0.825179 * my_time - Amira_Latency_Buffer_ms, amira_max_time_multiplier * soft_limit_ms)) - 10;
+ 
+                 if (soft_limit_ms > hard_limit_ms)
+                     soft_limit_ms = hard_limit_ms * 2 / 3;
+ 
+                 soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                 hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
+             } else
+                 use_time_limits = false;
+ 
+             uci_best_move_overall = NULL_MOVE;
+             int best_score_overall = 0;
+             int aspiration_alpha = -INF_SCORE;
+             int aspiration_beta = INF_SCORE;
+             int aspiration_window_delta = 15;
+             int last_iter_score = 0;
+             Move last_iter_best_move = NULL_MOVE;
+ 
+             for (int depth = 1; depth <= max_depth_to_search; ++depth) {
                 int current_score;
                 if (depth <= 1)
                      current_score = search(uci_root_pos, depth, -INF_SCORE, INF_SCORE, 0, true, true, uci_last_root_move);
