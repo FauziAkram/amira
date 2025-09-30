@@ -2295,34 +2295,29 @@ void uci_loop() {
              long long hard_limit_ms = 0;
  
              // From Engine 2: A small buffer to account for communication overhead.
-             const long long Amira_Latency_Buffer_ms = 10;
+             const long long Latency_Buffer_ms = 10;
  
              if (my_time != -1) {
                  use_time_limits = true;
  
                  // --- Engine 2 Time Management Logic ---
-                 double amira_ideal_time_ratio, amira_max_time_multiplier;
+                 double ideal_time_ratio, amira_max_time_multiplier;
                  int current_ply = (uci_root_pos.fullmove_number - 1) * 2 + (uci_root_pos.side_to_move == BLACK);
  
-                 int centi_moves_to_go = (movestogo > 0) ? std::min(movestogo * 100, 5000) : 5051;
+                 int moves_to_go_horizon = 50;
                  if (my_time < 1000)
-                     centi_moves_to_go = my_time * 5.051;
+                     moves_to_go = my_time * 0.05;
  
-                 long long amira_projected_time_pool = std::max(1LL, my_time + (my_inc * (centi_moves_to_go - 100) - Amira_Latency_Buffer_ms * (200 + centi_moves_to_go)) / 100);
+                 long long projected_time_pool = std::max(1LL, my_time + my_inc * (amira_moves_to_go - 1) - Amira_Latency_Buffer_ms * (2 + amira_moves_to_go));
  
-                 if (movestogo == 0) {
-                     double log_time_sec = std::log10(std::max(1.0, (double)my_time / 1000.0));
-                     double opt_constant = std::min(0.0032116 + 0.000321123 * log_time_sec, 0.00508017);
-                     double max_constant = std::max(3.3977 + 3.03950 * log_time_sec, 2.94761);
-                     amira_ideal_time_ratio = std::min(0.0121431 + std::pow(current_ply + 2.94693, 0.461073) * opt_constant, 0.213035 * my_time / amira_projected_time_pool);
-                     amira_max_time_multiplier = std::min(6.67704, max_constant + current_ply / 11.9847);
-                 } else {
-                     amira_ideal_time_ratio = std::min((0.88 + current_ply / 116.4) / (centi_moves_to_go / 100.0), 0.88 * my_time / amira_projected_time_pool);
-                     amira_max_time_multiplier = 1.3 + 0.11 * (centi_moves_to_go / 100.0);
-                 }
+                 double log_time_sec = std::log10(std::max(1.0, (double)my_time / 1000.0));
+                 double opt_constant = std::min(0.0032116 + 0.000321123 * log_time_sec, 0.00508017);
+                 double max_constant = std::max(3.3977 + 3.03950 * log_time_sec, 2.94761);
+                 ideal_time_ratio = std::min(0.0121431 + std::pow(current_ply + 2.94693, 0.461073) * opt_constant, 0.213035 * my_time / projected_time_pool);
+                 max_time_multiplier = std::min(6.67704, max_constant + current_ply / 11.9847);
  
-                 soft_limit_ms = static_cast<long long>(amira_ideal_time_ratio * amira_projected_time_pool);
-                 hard_limit_ms = static_cast<long long>(std::min(0.825179 * my_time - Amira_Latency_Buffer_ms, amira_max_time_multiplier * soft_limit_ms)) - 10;
+                 soft_limit_ms = static_cast<long long>(ideal_time_ratio * projected_time_pool);
+                 hard_limit_ms = static_cast<long long>(std::min(0.825179 * my_time - Latency_Buffer_ms, max_time_multiplier * soft_limit_ms)) - 10;
  
                  if (soft_limit_ms > hard_limit_ms)
                      soft_limit_ms = hard_limit_ms * 2 / 3;
