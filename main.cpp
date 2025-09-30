@@ -2296,9 +2296,14 @@ void uci_loop() {
             if (my_time != -1) {
                 use_time_limits = true;
 
+                int moves_to_go_horizon = 25;
+                if (my_time < 1000)
+                    moves_to_go_horizon = my_time * 0.025;
+long long projected_time_pool = std::max(1LL, my_time + my_inc * (moves_to_go_horizon - 1));
+
                 if (my_inc > 0) {
                     // --- INCREMENT TIME CONTROL ---
-                    soft_limit_ms = static_cast<long long>(my_time * 0.052);
+                    soft_limit_ms = static_cast<long long>(projected_time_pool * 0.052);
                     long long hard_limit_ms = static_cast<long long>(my_time * 0.41);
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
@@ -2308,14 +2313,11 @@ void uci_loop() {
 
                     // If 'movestogo' is given, we use that to divide our time.
                     // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
-                    int divisor = (movestogo > 0) ? movestogo : 25;
+                    int divisor = (movestogo > 0) ? movestogo : moves_to_go_horizon;
 
                     // Calculate the allocated time for this move.
-                    long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
-                    allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
+                    long long allocated_time_ms = projected_time_pool / divisor;
+                    allocated_time_ms = std::min(allocated_time_ms, projected_time_pool * 8 / 10);
                     
                     // Final safety buffer: always leave a small amount of time on the clock.
                     if (allocated_time_ms >= my_time)
@@ -2323,9 +2325,8 @@ void uci_loop() {
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
                     
                     // For simplicity, we use the same time for both soft and hard limits.
-                    soft_limit_ms = allocated_time_ms;
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
+                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(allocated_time_ms);
                 }
             } else
                 use_time_limits = false;
