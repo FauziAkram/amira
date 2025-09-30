@@ -2311,8 +2311,8 @@ void uci_loop() {
                  long long projected_time_pool = std::max(1LL, my_time + my_inc * (moves_to_go_horizon - 1) - Latency_Buffer_ms * (2 + moves_to_go_horizon));
  
                  double log_time_sec = std::log10(std::max(1.0, (double)my_time / 1000.0));
-                 double opt_constant = std::min(0.0032116 + 0.000321123 * log_time_sec, 0.00508017);
-                 double max_constant = std::max(3.3977 + 3.03950 * log_time_sec, 2.94761);
+                 double opt_constant = 0.004
+                 double max_constant = 4.0;
                  ideal_time_ratio = std::min(0.0121431 + std::pow(current_ply + 2.94693, 0.461073) * opt_constant, 0.213035 * my_time / projected_time_pool);
                  max_time_multiplier = std::min(6.67704, max_constant + current_ply / 11.9847);
  
@@ -2467,3 +2467,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
