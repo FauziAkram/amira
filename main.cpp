@@ -2151,13 +2151,6 @@ uint64_t calculate_zobrist_hash(const Position& pos) {
     return h;
 }
 
-Of course. Here is the complete uci_loop() function after applying the final change. This code preserves the original time management for increment games while integrating your improved logic for sudden death games.
-
-code
-C++
-download
-content_copy
-expand_less
 void uci_loop() {
     std::string line, token;
     parse_fen(uci_root_pos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -2478,5 +2471,6 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
 
 
