@@ -2245,7 +2245,7 @@ void uci_loop() {
                     if (!legal) break;
                 }
             }
-        } else if (token == "go") {
+} else if (token == "go") {
             if (!g_tt_is_initialized) {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
@@ -2292,41 +2292,42 @@ void uci_loop() {
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
             long long my_inc = (uci_root_pos.side_to_move == WHITE) ? winc : binc;
             long long soft_limit_ms = 0;
+            long long hard_limit_ms = 0;
+            const long long Latency_Buffer_ms = 10;
 
             if (my_time != -1) {
                 use_time_limits = true;
+                int current_ply = (uci_root_pos.fullmove_number - 1) * 2 + (uci_root_pos.side_to_move == BLACK);
 
                 if (my_inc > 0) {
-                    // --- INCREMENT TIME CONTROL ---
+                    // --- INCREMENT TIME CONTROL (Original logic is preserved) ---
                     soft_limit_ms = static_cast<long long>(my_time * 0.052);
-                    long long hard_limit_ms = static_cast<long long>(my_time * 0.41);
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
+                    hard_limit_ms = static_cast<long long>(my_time * 0.41);
                 } else {
-                    // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
+                    // --- NEW SUDDEN DEATH TIME CONTROL (Polished and Improved Logic) ---
+                    double ideal_time_ratio, max_time_multiplier;
 
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
-                    int divisor = (movestogo > 0) ? movestogo : 25;
+                    int moves_to_go_horizon = 50;
+                    if (my_time < 1000)
+                        moves_to_go_horizon = my_time * 0.05;
 
-                    // Calculate the allocated time for this move.
-                    long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
-                    allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
-                    if (allocated_time_ms >= my_time)
-                        allocated_time_ms = my_time - 100; // Leave 100ms
-                    if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
-                    soft_limit_ms = allocated_time_ms;
-                    soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
-                    hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                    // In sudden death, projected_time_pool is simply the time left, as my_inc is 0.
+                    long long projected_time_pool = std::max(1LL, my_time);
+
+                    double log_time_sec = std::log10(std::max(1.0, (double)my_time / 1000.0));
+                    ideal_time_ratio = std::min(0.012 + std::pow(current_ply + 2.95, 0.46) * 0.004, 0.213 * my_time / projected_time_pool);
+                    max_time_multiplier = std::min(6.67, 3.9 + current_ply / 11.98);
+
+                    soft_limit_ms = static_cast<long long>(ideal_time_ratio * projected_time_pool);
+                    hard_limit_ms = static_cast<long long>(std::min(0.825 * my_time - Latency_Buffer_ms, max_time_multiplier * soft_limit_ms)) - 10;
                 }
+
+                // Final safety check to ensure soft limit is not more than hard limit
+                if (soft_limit_ms > hard_limit_ms)
+                   soft_limit_ms = hard_limit_ms * 2 / 3;
+
+                soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
+                hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
             } else
                 use_time_limits = false;
 
@@ -2470,3 +2471,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
