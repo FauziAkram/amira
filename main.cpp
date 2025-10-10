@@ -1325,9 +1325,8 @@ int evaluate(Position& pos) {
                 }
             }
         }
-        if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2) {
+        if (pop_count(pos.piece_bb[BISHOP] & pos.color_bb[current_eval_color]) >= 2)
             current_color_score += BISHOP_PAIR_BONUS; 
-        }
 
         // --- Add threat score ---
         current_color_score += evaluate_threats_for_color(pos, current_eval_color, attackedBy, attackedBy2);
