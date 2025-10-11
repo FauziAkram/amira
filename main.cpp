@@ -7,6 +7,7 @@
 #include <cstring> // For std::memset
 #include <cstdint>
 #include <random>   // For std::mt19937_64
+#include <array>    // For std::array
 #include <cctype>   // For std::isdigit, std::islower, std::tolower
 #include <cmath>    // For std::log
 
@@ -2502,4 +2503,5 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
 
