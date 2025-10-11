@@ -61,9 +61,9 @@ enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
 constexpr uint8_t EMPTY_SQUARE = 31; // A value outside the piece-color range
-inline uint8_t make_piece(Piece type, Color color) { return (uint8_t)type * 4 + (uint8_t)color; }
-inline Piece get_piece_type(uint8_t piece) { return (Piece)(piece / 4); }
-inline Color get_piece_color(uint8_t piece) { return (Color)(piece % 4); }
+constexpr uint8_t make_piece(Piece type, Color color) { return (uint8_t)type * 4 + (uint8_t)color; }
+constexpr Piece get_piece_type(uint8_t piece) { return (Piece)(piece / 4); }
+constexpr Color get_piece_color(uint8_t piece) { return (Color)(piece % 4); }
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 512;
 constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
@@ -207,8 +207,8 @@ struct Position {
 };
 
 // --- Bitboard Utilities ---
-inline uint64_t set_bit(int sq) { return 1ULL << sq; }
-inline bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
+constexpr uint64_t set_bit(int sq) { return 1ULL << sq; }
+constexpr bool get_bit(uint64_t bb, int sq) { return (bb >> sq) & 1; }
 inline int pop_count(uint64_t bb) {
 #if defined(_MSC_VER)
     return static_cast<int>(__popcnt64(bb));
@@ -231,41 +231,57 @@ inline int lsb_index(uint64_t bb) {
     return count;
 #endif
 }
-inline int file_of(int sq) { return sq % 8; }
-inline int rank_of(int sq) { return sq / 8; }
-inline int relative_rank(int sq, Color color) { return rank_of(sq) ^ (color * 7); }
+constexpr int file_of(int sq) { return sq % 8; }
+constexpr int rank_of(int sq) { return sq / 8; }
+constexpr int relative_rank(int sq, Color color) { return rank_of(sq) ^ (color * 7); }
 
-uint64_t north(uint64_t b) { return b << 8; }
-uint64_t south(uint64_t b) { return b >> 8; }
-uint64_t east(uint64_t b) { return (b << 1) & ~0x0101010101010101ULL; }
-uint64_t west(uint64_t b) { return (b >> 1) & ~0x8080808080808080ULL; }
-uint64_t nw(uint64_t b) { return north(west(b)); }
-uint64_t ne(uint64_t b) { return north(east(b)); }
-uint64_t sw(uint64_t b) { return south(west(b)); }
-uint64_t se(uint64_t b) { return south(east(b)); }
+constexpr uint64_t north(uint64_t b) { return b << 8; }
+constexpr uint64_t south(uint64_t b) { return b >> 8; }
+constexpr uint64_t east(uint64_t b) { return (b << 1) & ~0x0101010101010101ULL; }
+constexpr uint64_t west(uint64_t b) { return (b >> 1) & ~0x8080808080808080ULL; }
+constexpr uint64_t nw(uint64_t b) { return north(west(b)); }
+constexpr uint64_t ne(uint64_t b) { return north(east(b)); }
+constexpr uint64_t sw(uint64_t b) { return south(west(b)); }
+constexpr uint64_t se(uint64_t b) { return south(east(b)); }
 
-// --- Attack Tables Init ---
-uint64_t pawn_attacks_bb[2][64];
-uint64_t knight_attacks_bb[64];
-uint64_t king_attacks_bb[64];
-
-void init_attack_tables() {
+// --- Compile-Time Attack Table Generation ---
+constexpr auto generate_pawn_attacks() {
+    std::array<std::array<uint64_t, 64>, 2> attacks{};
     for (int sq = 0; sq < 64; ++sq) {
         uint64_t b = set_bit(sq);
-        pawn_attacks_bb[WHITE][sq] = nw(b) | ne(b);
-        pawn_attacks_bb[BLACK][sq] = sw(b) | se(b);
+        attacks[WHITE][sq] = nw(b) | ne(b);
+        attacks[BLACK][sq] = sw(b) | se(b);
+    }
+    return attacks;
+}
 
-        knight_attacks_bb[sq] = (
+constexpr auto generate_knight_attacks() {
+    std::array<uint64_t, 64> attacks{};
+    for (int sq = 0; sq < 64; ++sq) {
+        uint64_t b = set_bit(sq);
+        attacks[sq] = (
             ((b << 17) & ~0x0101010101010101ULL) | ((b << 15) & ~0x8080808080808080ULL) |
             ((b << 10) & ~0x0303030303030303ULL) | ((b << 6)  & ~0xC0C0C0C0C0C0C0C0ULL) |
             ((b >> 17) & ~0x8080808080808080ULL) | ((b >> 15) & ~0x0101010101010101ULL) |
             ((b >> 10) & ~0xC0C0C0C0C0C0C0C0ULL) | ((b >> 6)  & ~0x0303030303030303ULL)
         );
-
-        king_attacks_bb[sq] = north(b) | south(b) | east(b) | west(b) |
-                              ne(b) | nw(b) | se(b) | sw(b);
     }
+    return attacks;
 }
+
+constexpr auto generate_king_attacks() {
+    std::array<uint64_t, 64> attacks{};
+    for (int sq = 0; sq < 64; ++sq) {
+        uint64_t b = set_bit(sq);
+        attacks[sq] = north(b) | south(b) | east(b) | west(b) |
+                      ne(b) | nw(b) | se(b) | sw(b);
+    }
+    return attacks;
+}
+
+constexpr auto pawn_attacks_bb = generate_pawn_attacks();
+constexpr auto knight_attacks_bb = generate_knight_attacks();
+constexpr auto king_attacks_bb = generate_king_attacks();
 
 // --- Magic Bitboard Slider Attack Generation ---
 const uint64_t magic_rook_mask[64] = {
@@ -791,13 +807,70 @@ const PhaseScore king_pst[64] = {
 const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
 const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
 
-// Evaluation helper masks
-uint64_t file_bb_mask[8];
-uint64_t rank_bb_mask[8];
-uint64_t white_passed_pawn_block_mask[64];
-uint64_t black_passed_pawn_block_mask[64];
-uint64_t adjacent_files_mask[8];
-uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
+// --- Compile-Time Evaluation Mask Generation ---
+constexpr auto generate_file_masks() {
+    std::array<uint64_t, 8> masks{};
+    for (int f = 0; f < 8; ++f) {
+        for (int r = 0; r < 8; ++r) masks[f] |= set_bit(r * 8 + f);
+    }
+    return masks;
+}
+
+constexpr auto generate_rank_masks() {
+    std::array<uint64_t, 8> masks{};
+    for (int r = 0; r < 8; ++r) {
+        for (int f = 0; f < 8; ++f) masks[r] |= set_bit(r * 8 + f);
+    }
+    return masks;
+}
+
+constexpr auto generate_adjacent_file_masks(const std::array<uint64_t, 8>& file_masks) {
+    std::array<uint64_t, 8> masks{};
+    for (int f = 0; f < 8; ++f) {
+        if (f > 0) masks[f] |= file_masks[f - 1];
+        if (f < 7) masks[f] |= file_masks[f + 1];
+    }
+    return masks;
+}
+
+constexpr auto generate_passed_pawn_masks() {
+    std::array<std::array<uint64_t, 64>, 2> masks{}; // [color][square]
+     for (int sq = 0; sq < 64; ++sq) {
+         int r = rank_of(sq);
+         int f = file_of(sq);
+         // White passed pawn mask
+         for (int cur_r = r + 1; cur_r < 8; ++cur_r) {
+             masks[WHITE][sq] |= set_bit(cur_r * 8 + f);
+             if (f > 0) masks[WHITE][sq] |= set_bit(cur_r * 8 + (f - 1));
+             if (f < 7) masks[WHITE][sq] |= set_bit(cur_r * 8 + (f + 1));
+         }
+         // Black passed pawn mask
+         for (int cur_r = r - 1; cur_r >= 0; --cur_r) {
+             masks[BLACK][sq] |= set_bit(cur_r * 8 + f);
+             if (f > 0) masks[BLACK][sq] |= set_bit(cur_r * 8 + (f - 1));
+             if (f < 7) masks[BLACK][sq] |= set_bit(cur_r * 8 + (f + 1));
+         }
+     }
+     return masks;
+ }
+ 
+ constexpr auto generate_pawn_attack_shield_masks(const std::array<std::array<uint64_t, 64>, 2>& passed_masks, const std::array<uint64_t, 8>& adjacent_masks) {
+     std::array<std::array<uint64_t, 64>, 2> masks{}; // [color][square]
+     for (int sq = 0; sq < 64; ++sq) {
+         int f = file_of(sq);
+         masks[WHITE][sq] = passed_masks[BLACK][sq] & adjacent_masks[f];
+         masks[BLACK][sq] = passed_masks[WHITE][sq] & adjacent_masks[f];
+     }
+     return masks;
+ }
+
+constexpr auto file_bb_mask = generate_file_masks();
+constexpr auto rank_bb_mask = generate_rank_masks();
+constexpr auto adjacent_files_mask = generate_adjacent_file_masks(file_bb_mask);
+constexpr auto passed_pawn_block_mask = generate_passed_pawn_masks();
+constexpr auto white_passed_pawn_block_mask = passed_pawn_block_mask[WHITE];
+constexpr auto black_passed_pawn_block_mask = passed_pawn_block_mask[BLACK];
+constexpr auto pawn_attack_shield_mask = generate_pawn_attack_shield_masks(passed_pawn_block_mask, adjacent_files_mask);
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
 const PhaseScore passed_pawn_bonus[8] = {
@@ -872,44 +945,6 @@ const int SafetySafeRookCheck   = 61;
 const int SafetySafeBishopCheck = 50;
 const int SafetySafeKnightCheck = 58;
 const int SafetyAdjustment      = -63;
-
-void init_eval_masks() {
-    for (int f = 0; f < 8; ++f) {
-        file_bb_mask[f] = 0ULL;
-        for (int r = 0; r < 8; ++r) file_bb_mask[f] |= set_bit(r * 8 + f);
-        adjacent_files_mask[f] = 0ULL;
-        if (f > 0) adjacent_files_mask[f] |= file_bb_mask[f-1];
-        if (f < 7) adjacent_files_mask[f] |= file_bb_mask[f+1];
-    }
-    for (int r = 0; r < 8; ++r) {
-        rank_bb_mask[r] = 0ULL;
-        for (int f = 0; f < 8; ++f) rank_bb_mask[r] |= set_bit(r * 8 + f);
-    }
-
-    for (int sq = 0; sq < 64; ++sq) {
-        white_passed_pawn_block_mask[sq] = 0ULL;
-        black_passed_pawn_block_mask[sq] = 0ULL;
-        pawn_attack_shield_mask[WHITE][sq] = 0ULL;
-        pawn_attack_shield_mask[BLACK][sq] = 0ULL;
-
-        int r = sq / 8, f = sq % 8;
-        for (int cur_r = r + 1; cur_r < 8; ++cur_r) { // Squares in front for White
-            white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
-            if (f > 0) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
-            if (f < 7) white_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
-        }
-        for (int cur_r = r - 1; cur_r >= 0; --cur_r) { // Squares in front for Black
-            black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + f);
-            if (f > 0) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f - 1));
-            if (f < 7) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
-        }
-
-        // Outpost defense masks: Squares on adjacent files "behind" the outpost square from enemy's view.
-        // This is equivalent to the squares on adjacent files that are part of the *enemy's* passed pawn blocking mask for that square.
-        pawn_attack_shield_mask[WHITE][sq] = black_passed_pawn_block_mask[sq] & adjacent_files_mask[f];
-        pawn_attack_shield_mask[BLACK][sq] = white_passed_pawn_block_mask[sq] & adjacent_files_mask[f];
-    }
-}
 
 // Checks for draw by insufficient material.
 bool is_insufficient_material(const Position& pos) {
@@ -2461,11 +2496,10 @@ int main(int argc, char* argv[]) {
     std::cin.tie(NULL);
 
     init_zobrist();
-    init_attack_tables();
     init_magic_bitboards();
-    init_eval_masks();
     init_pawn_cache();
     reset_search_heuristics();
     uci_loop();
     return 0;
 }
+
