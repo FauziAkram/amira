@@ -529,29 +529,37 @@ int generate_moves(const Position& pos, Move* moves_list, bool captures_only) {
         }
     }
 
-    Piece piece_types_non_pawn[] = {KNIGHT, BISHOP, ROOK, QUEEN, KING};
-    for (Piece p_type : piece_types_non_pawn) {
-        uint64_t pieces_of_type = pos.piece_bb[p_type] & my_pieces;
-        while (pieces_of_type) {
-            int from = lsb_index(pieces_of_type);
-            pieces_of_type &= pieces_of_type - 1;
-
-            uint64_t attacks = 0;
-            if (p_type == KNIGHT) attacks = knight_attacks_bb[from];
-            else if (p_type == BISHOP) attacks = get_bishop_attacks(from, occupied);
-            else if (p_type == ROOK) attacks = get_rook_attacks(from, occupied);
-            else if (p_type == QUEEN) attacks = get_queen_attacks(from, occupied);
-            else if (p_type == KING) attacks = king_attacks_bb[from];
-
-            attacks &= (captures_only ? opp_pieces : ~my_pieces); // Only captures or any non-friendly square
-
-            while (attacks) {
-                int to = lsb_index(attacks);
-                attacks &= attacks - 1;
-                moves_list[move_count++] = {from, to};
-            }
+    // --- Helper to add moves from a 'from' square and a 'to' bitboard ---
+    auto splat_moves = [&](int from, uint64_t to_bb) {
+        while (to_bb) {
+            int to = lsb_index(to_bb);
+            to_bb &= to_bb - 1;
+            moves_list[move_count++] = {from, to};
         }
+    };
+
+    uint64_t targets = captures_only ? opp_pieces : ~my_pieces;
+
+    // --- Generate moves for each piece type ---
+    for (uint64_t p_bb = pos.piece_bb[KNIGHT] & my_pieces; p_bb; p_bb &= p_bb - 1) {
+        int from = lsb_index(p_bb);
+        splat_moves(from, knight_attacks_bb[from] & targets);
     }
+    for (uint64_t p_bb = pos.piece_bb[BISHOP] & my_pieces; p_bb; p_bb &= p_bb - 1) {
+        int from = lsb_index(p_bb);
+        splat_moves(from, get_bishop_attacks(from, occupied) & targets);
+    }
+    for (uint64_t p_bb = pos.piece_bb[ROOK] & my_pieces; p_bb; p_bb &= p_bb - 1) {
+        int from = lsb_index(p_bb);
+        splat_moves(from, get_rook_attacks(from, occupied) & targets);
+    }
+    for (uint64_t p_bb = pos.piece_bb[QUEEN] & my_pieces; p_bb; p_bb &= p_bb - 1) {
+        int from = lsb_index(p_bb);
+        splat_moves(from, get_queen_attacks(from, occupied) & targets);
+    }
+    for (uint64_t p_bb = pos.piece_bb[KING] & my_pieces; p_bb; p_bb &= p_bb - 1) {
+        int from = lsb_index(p_bb);
+        splat_moves(from, king_attacks_bb[from] & targets);    }
 
     // Castling
     if (!captures_only) {
@@ -2159,7 +2167,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.69\n";
+            std::cout << "id name Amira 1.70\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
