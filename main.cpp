@@ -2425,9 +2425,8 @@ void uci_loop() {
                         soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     }
                     // Confidence: if the best move is stable for a few iterations, we can consider stopping early.
-                    if (uci_best_move_overall == last_iter_best_move && elapsed_ms * 2 > soft_limit_ms) {
+                    if (uci_best_move_overall == last_iter_best_move && elapsed_ms * 2 > soft_limit_ms)
                          break;
-                    }
                 }
                 last_iter_score = best_score_overall;
                 last_iter_best_move = uci_best_move_overall;
@@ -2477,3 +2476,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
