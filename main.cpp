@@ -268,7 +268,7 @@ void init_attack_tables() {
 }
 
 // --- Magic Bitboard Slider Attack Generation ---
-const uint64_t magic_rook_mask[64] = {
+constexpr uint64_t magic_rook_mask[64] = {
   0x000101010101017Eull, 0x000202020202027Cull, 0x000404040404047Aull, 0x0008080808080876ull, 0x001010101010106Eull, 0x002020202020205Eull, 0x004040404040403Eull, 0x008080808080807Eull,
   0x0001010101017E00ull, 0x0002020202027C00ull, 0x0004040404047A00ull, 0x0008080808087600ull, 0x0010101010106E00ull, 0x0020202020205E00ull, 0x0040404040403E00ull, 0x0080808080807E00ull,
   0x00010101017E0100ull, 0x00020202027C0200ull, 0x00040404047A0400ull, 0x0008080808760800ull, 0x00101010106E1000ull, 0x00202020205E2000ull, 0x00404040403E4000ull, 0x00808080807E8000ull,
@@ -278,7 +278,7 @@ const uint64_t magic_rook_mask[64] = {
   0x007E010101010100ull, 0x007C020202020200ull, 0x007A040404040400ull, 0x0076080808080800ull, 0x006E101010101000ull, 0x005E202020202000ull, 0x003E404040404000ull, 0x007E808080808000ull,
   0x7E01010101010100ull, 0x7C02020202020200ull, 0x7A04040404040400ull, 0x7608080808080800ull, 0x6E10101010101000ull, 0x5E20202020202000ull, 0x3E40404040404000ull, 0x7E80808080808000ull
 };
-const uint64_t magic_rook[64] = {
+constexpr uint64_t magic_rook[64] = {
   0x0080001020400080ull, 0x0040001000200040ull, 0x0080081000200080ull, 0x0080040800100080ull, 0x0080020400080080ull, 0x0080010200040080ull, 0x0080008001000200ull, 0x0080002040800100ull,
   0x0000800020400080ull, 0x0000400020005000ull, 0x0000801000200080ull, 0x0000800800100080ull, 0x0000800400080080ull, 0x0000800200040080ull, 0x0000800100020080ull, 0x0000800040800100ull,
   0x0000208000400080ull, 0x0000404000201000ull, 0x0000808010002000ull, 0x0000808008001000ull, 0x0000808004000800ull, 0x0000808002000400ull, 0x0000010100020004ull, 0x0000020000408104ull,
@@ -288,9 +288,9 @@ const uint64_t magic_rook[64] = {
   0x0000204000800080ull, 0x0000200040008080ull, 0x0000100020008080ull, 0x0000080010008080ull, 0x0000040008008080ull, 0x0000020004008080ull, 0x0000800100020080ull, 0x0000800041000080ull,
   0x00FFFCDDFCED714Aull, 0x007FFCDDFCED714Aull, 0x003FFFCDFFD88096ull, 0x0000040810002101ull, 0x0001000204080011ull, 0x0001000204000801ull, 0x0001000082000401ull, 0x0001FFFAABFAD1A2ull
 };
-const uint32_t magic_rook_shift[64] = { 52, 53, 53, 53, 53, 53, 53, 52, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 53, 53, 53, 53, 53 };
+constexpr uint32_t magic_rook_shift[64] = { 52, 53, 53, 53, 53, 53, 53, 52, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 54, 54, 54, 54, 53, 53, 54, 54, 53, 53, 53, 53, 53 };
 
-const uint64_t magic_bishop_mask[64] = {
+constexpr uint64_t magic_bishop_mask[64] = {
   0x0040201008040200ull, 0x0000402010080400ull, 0x0000004020100A00ull, 0x0000000040221400ull, 0x0000000002442800ull, 0x0000000204085000ull, 0x0000020408102000ull, 0x0002040810204000ull,
   0x0020100804020000ull, 0x0040201008040000ull, 0x00004020100A0000ull, 0x0000004022140000ull, 0x0000000244280000ull, 0x0000020408500000ull, 0x0002040810200000ull, 0x0004081020400000ull,
   0x0010080402000200ull, 0x0020100804000400ull, 0x004020100A000A00ull, 0x0000402214001400ull, 0x0000024428002800ull, 0x0002040850005000ull, 0x0004081020002000ull, 0x0008102040004000ull,
@@ -300,7 +300,7 @@ const uint64_t magic_bishop_mask[64] = {
   0x0000020408102000ull, 0x0000040810204000ull, 0x00000A1020400000ull, 0x0000142240000000ull, 0x0000284402000000ull, 0x0000500804020000ull, 0x0000201008040200ull, 0x0000402010080400ull,
   0x0002040810204000ull, 0x0004081020400000ull, 0x000A102040000000ull, 0x0014224000000000ull, 0x0028440200000000ull, 0x0050080402000000ull, 0x0020100804020000ull, 0x0040201008040200ull
 };
-const uint64_t magic_bishop[64] = {
+constexpr uint64_t magic_bishop[64] = {
   0x0002020202020200ull, 0x0002020202020000ull, 0x0004010202000000ull, 0x0004040080000000ull, 0x0001104000000000ull, 0x0000821040000000ull, 0x0000410410400000ull, 0x0000104104104000ull,
   0x0000040404040400ull, 0x0000020202020200ull, 0x0000040102020000ull, 0x0000040400800000ull, 0x0000011040000000ull, 0x0000008210400000ull, 0x0000004104104000ull, 0x0000002082082000ull,
   0x0004000808080800ull, 0x0002000404040400ull, 0x0001000202020200ull, 0x0000800802004000ull, 0x0000800400A00000ull, 0x0000200100884000ull, 0x0000400082082000ull, 0x0000200041041000ull,
@@ -310,7 +310,7 @@ const uint64_t magic_bishop[64] = {
   0x0000410410400000ull, 0x0000208208200000ull, 0x0000002084100000ull, 0x0000000020880000ull, 0x0000001002020000ull, 0x0000040408020000ull, 0x0004040404040000ull, 0x0002020202020000ull,
   0x0000104104104000ull, 0x0000002082082000ull, 0x0000000020841000ull, 0x0000000000208800ull, 0x0000000010020200ull, 0x0000000404080200ull, 0x0000040404040400ull, 0x0002020202020200ull
 };
-const uint32_t magic_bishop_shift[64] = { 58, 59, 59, 59, 59, 59, 59, 58, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 57, 57, 57, 57, 59, 59, 59, 59, 57, 55, 55, 57, 59, 59, 59, 59, 57, 55, 55, 57, 59, 59, 59, 59, 57, 57, 57, 57, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 58, 59, 59, 59, 59, 59, 59, 58 };
+constexpr uint32_t magic_bishop_shift[64] = { 58, 59, 59, 59, 59, 59, 59, 58, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 57, 57, 57, 57, 59, 59, 59, 59, 57, 55, 55, 57, 59, 59, 59, 59, 57, 55, 55, 57, 59, 59, 59, 59, 57, 57, 57, 57, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 58, 59, 59, 59, 59, 59, 59, 58 };
 
 uint64_t magic_rook_table[102400];
 uint64_t* magic_rook_indices[64] = {
@@ -971,20 +971,17 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         int f = sq % 8;
 
         // Isolated Pawn Evaluation
-        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
+        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0)
             pawn_score += ISOLATED_PAWN_PENALTY;
-        }
 
         // Protected Pawn Evaluation
-        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
+        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns)
             pawn_score += PROTECTED_PAWN_BONUS;
-        }
         
         // Doubled Pawn Evaluation
         uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
-        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
+        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0)
             pawn_score += DOUBLED_PAWN_PENALTY;
-        }
 
         // Connected Pawn (Phalanx) Bonus
         if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
@@ -997,9 +994,8 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
         if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
             int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
-            if (get_bit(enemy_pawn_attacks, push_sq)) {
+            if (get_bit(enemy_pawn_attacks, push_sq))
                 pawn_score += BACKWARD_PAWN_PENALTY;
-            }
         }
 
         // Passed Pawn Detection
@@ -1052,9 +1048,8 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     int pawn_advantage = pop_count(stronger_side_pawns) - pop_count(pos.piece_bb[PAWN] & pos.color_bb[weaker_side]);
     
     // If the stronger side is only up a single pawn, and has no major pieces, it's often a draw.
-    if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1) {
+    if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1)
         return 160;
-    }
 
     // Scale based on the number of pawns for the stronger side.
     // Winning with few pawns is harder.
@@ -2167,7 +2162,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.70\n";
+            std::cout << "id name Amira 1.71\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
