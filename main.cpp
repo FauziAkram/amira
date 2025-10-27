@@ -971,20 +971,17 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         int f = sq % 8;
 
         // Isolated Pawn Evaluation
-        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0) {
+        if ((adjacent_files_mask[f] & all_friendly_pawns) == 0)
             pawn_score += ISOLATED_PAWN_PENALTY;
-        }
 
         // Protected Pawn Evaluation
-        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns) {
+        if (pawn_attacks_bb[1 - current_eval_color][sq] & all_friendly_pawns)
             pawn_score += PROTECTED_PAWN_BONUS;
-        }
         
         // Doubled Pawn Evaluation
         uint64_t forward_file_squares = (current_eval_color == WHITE) ? north(set_bit(sq)) : south(set_bit(sq));
-        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0) {
+        if ((file_bb_mask[f] & forward_file_squares & all_friendly_pawns) != 0)
             pawn_score += DOUBLED_PAWN_PENALTY;
-        }
 
         // Connected Pawn (Phalanx) Bonus
         if (get_bit(east(set_bit(sq)), all_friendly_pawns)) {
@@ -997,9 +994,8 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
         if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
             int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
-            if (get_bit(enemy_pawn_attacks, push_sq)) {
+            if (get_bit(enemy_pawn_attacks, push_sq))
                 pawn_score += BACKWARD_PAWN_PENALTY;
-            }
         }
 
         // Passed Pawn Detection
@@ -1052,9 +1048,8 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     int pawn_advantage = pop_count(stronger_side_pawns) - pop_count(pos.piece_bb[PAWN] & pos.color_bb[weaker_side]);
     
     // If the stronger side is only up a single pawn, and has no major pieces, it's often a draw.
-    if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1) {
+    if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1)
         return 160;
-    }
 
     // Scale based on the number of pawns for the stronger side.
     // Winning with few pawns is harder.
