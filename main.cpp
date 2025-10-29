@@ -55,7 +55,6 @@ struct PhaseScore {
     }
 };
 
-
 // --- Constants ---
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
@@ -2359,7 +2358,7 @@ void uci_loop() {
                     aspiration_alpha = current_score - aspiration_window_delta;
                     aspiration_beta = current_score + aspiration_window_delta;
                     aspiration_window_delta += aspiration_window_delta / 3 + 5;
-                    if (aspiration_window_delta > 300) aspiration_window_delta = 300;
+                    aspiration_window_delta = std::min(aspiration_window_delta, 300);
                 } else {
                     aspiration_alpha = -INF_SCORE;
                     aspiration_beta = INF_SCORE;
