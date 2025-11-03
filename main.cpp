@@ -421,24 +421,15 @@ inline uint64_t get_queen_attacks(int sq, uint64_t occupied) {
 
 // --- is_square_attacked and helpers ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
-    uint64_t attacker_pawns = pos.piece_bb[PAWN] & pos.color_bb[attacker_c];
-    if (pawn_attacks_bb[1 - attacker_c][sq_to_check] & attacker_pawns) return true;
-
-    uint64_t attacker_knights = pos.piece_bb[KNIGHT] & pos.color_bb[attacker_c];
-    if (knight_attacks_bb[sq_to_check] & attacker_knights) return true;
-
-    uint64_t attacker_king = pos.piece_bb[KING] & pos.color_bb[attacker_c];
-    if (king_attacks_bb[sq_to_check] & attacker_king) return true;
-
     uint64_t occupied = pos.get_occupied_bb();
+    uint64_t attackers = pos.color_bb[attacker_c];
 
-    uint64_t rook_queen_attackers = (pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_rook_attacks(sq_to_check, occupied) & rook_queen_attackers) return true;
+    return (pawn_attacks_bb[1 - attacker_c][sq_to_check] & (pos.piece_bb[PAWN] & attackers)) ||
+           (knight_attacks_bb[sq_to_check] & (pos.piece_bb[KNIGHT] & attackers)) ||
+           (king_attacks_bb[sq_to_check] & (pos.piece_bb[KING] & attackers)) ||
+           (get_rook_attacks(sq_to_check, occupied) & ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) & attackers)) ||
+           (get_bishop_attacks(sq_to_check, occupied) & ((pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & attackers));
 
-    uint64_t bishop_queen_attackers = (pos.piece_bb[BISHOP] | pos.piece_bb[QUEEN]) & pos.color_bb[attacker_c];
-    if (get_bishop_attacks(sq_to_check, occupied) & bishop_queen_attackers) return true;
-
-    return false;
 }
 
 uint64_t get_attackers_to_sq(const Position& pos, int sq_to_check, uint64_t occupied) {
@@ -2161,7 +2152,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.71\n";
+            std::cout << "id name Amira 1.72\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
