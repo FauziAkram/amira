@@ -1518,9 +1518,6 @@ int16_t history_score[2][2][2][64][64]; // [color][from_threat][to_threat][from]
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
 int late_move_pruning_counts[2][MAX_PLY]; // For Late Move Pruning [improving][depth]
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
-constexpr int HISTORY_DIVISOR = 24000;
-constexpr int TACTICAL_LOOKAHEAD_MIN_DEPTH = 5;
-constexpr int TACTICAL_LOOKAHEAD_MARGIN = 110;
 constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
 
 // Repetition Detection Data Structures
@@ -1840,8 +1837,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     uint64_t threats = get_all_attacked_squares(pos, 1 - pos.side_to_move);
 
     // --- Tactical Lookahead Pruning ---
-    if (!is_pv_node && !in_check && depth >= TACTICAL_LOOKAHEAD_MIN_DEPTH && std::abs(beta) < MATE_THRESHOLD) {
-        int raised_beta = beta + TACTICAL_LOOKAHEAD_MARGIN;
+    if (!is_pv_node && !in_check && depth >= 5 && std::abs(beta) < MATE_THRESHOLD) {
+        int raised_beta = beta + 110;
 
         MovePicker tactical_picker(pos, ply, NULL_MOVE, NULL_MOVE, threats, true);
         Move tactical_move;
@@ -1987,7 +1984,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
                         // History Heuristic Update
                         auto update = [&](int16_t& h, int b) {
-                            h += b - (h * std::abs(b) / HISTORY_DIVISOR);
+                            h += b - (h * std::abs(b) / 24000);
                         };
                         
                         int bonus = std::min(160 * depth - 60, 1500);
@@ -2152,7 +2149,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.73\n";
+            std::cout << "id name Amira 1.74\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2461,4 +2458,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
