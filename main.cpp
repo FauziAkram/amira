@@ -1990,7 +1990,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                             h += b - (h * std::abs(b) / HISTORY_DIVISOR);
                         };
                         
-                        int bonus = depth * depth;
+                        int bonus = std::min(160 * depth - 60, 1500);
                         bool threat_from = get_bit(threats, current_move.from);
                         bool threat_to   = get_bit(threats, current_move.to);
                         update(history_score[pos.side_to_move][threat_from][threat_to][current_move.from][current_move.to], bonus);
@@ -2152,7 +2152,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.72\n";
+            std::cout << "id name Amira 1.73\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2461,3 +2461,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
