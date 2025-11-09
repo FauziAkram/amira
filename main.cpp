@@ -1794,9 +1794,10 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (!is_pv_node && !in_check) {
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
-            int futility_margin = 70 + 50 * depth;
-            if (static_eval - futility_margin >= beta)
-                return beta; 
+            bool improving = (ply >= 2 && static_eval > search_path_evals[ply-2]);
+            int rfp_margin = 64 * (depth - improving);
+            if (static_eval - rfp_margin >= beta)
+                return static_eval;
         }
 
         // Razoring
@@ -2149,7 +2150,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.73\n";
+            std::cout << "id name Amira 1.74\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
