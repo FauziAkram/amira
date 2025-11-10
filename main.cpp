@@ -1824,8 +1824,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.zobrist_hash ^= zobrist_side_to_move;
             null_next_pos.ply = pos.ply + 1;
 
-            int R_nmp = 3 + (depth > 6);
-            int null_score = -search(null_next_pos, depth - 1 - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
+            int eval_bonus = std::min(3, (static_eval - beta) / 200);
+            int R_nmp = 3 + depth / 4 + eval_bonus;
+            int null_score = -search(null_next_pos, depth - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
             if (null_score >= beta) {
@@ -2150,7 +2151,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.74\n";
+            std::cout << "id name Amira 1.75\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
