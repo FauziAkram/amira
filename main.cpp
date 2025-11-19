@@ -736,7 +736,7 @@ PhaseScore piece_phase_values[6] = {
 int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
  static int tune_see_values = []() {
      for (int i = 0; i < 5; ++i) { // Skip 5 (10000) and 6 (0)
-         Tune::instance().add_entry(Range(0, 1500), "see_piece_values_" + std::to_string(i), see_piece_values[i]);
+         Tune::instance().add_entry(Range(0, 2000), "see_piece_values_" + std::to_string(i), see_piece_values[i]);
      }
      return 0;
  }();
@@ -848,13 +848,13 @@ PhaseScore passed_pawn_bonus[8] = {
 // --- Evaluation Constants ---
 // Removed consts and added TUNE. Splitting PhaseScores components for tuning.
 PhaseScore TEMPO_BONUS                   = {15, 15};
-TUNE(Range(0, 100), TEMPO_BONUS.mg, TEMPO_BONUS.eg);
+TUNE(Range(0, 60), TEMPO_BONUS.mg, TEMPO_BONUS.eg);
 
 PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
 TUNE(Range(0, 200), BISHOP_PAIR_BONUS.mg, BISHOP_PAIR_BONUS.eg);
 
 PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-TUNE(Range(0, 100), PROTECTED_PAWN_BONUS.mg, PROTECTED_PAWN_BONUS.eg);
+TUNE(Range(0, 60), PROTECTED_PAWN_BONUS.mg, PROTECTED_PAWN_BONUS.eg);
 
 PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
 TUNE(Range(-100, 0), ISOLATED_PAWN_PENALTY.mg, ISOLATED_PAWN_PENALTY.eg);
@@ -863,19 +863,19 @@ PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
 TUNE(Range(-100, 0), DOUBLED_PAWN_PENALTY.mg, DOUBLED_PAWN_PENALTY.eg);
 
 PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-TUNE(Range(-100, 0), BACKWARD_PAWN_PENALTY.mg, BACKWARD_PAWN_PENALTY.eg);
+TUNE(Range(-80, 0), BACKWARD_PAWN_PENALTY.mg, BACKWARD_PAWN_PENALTY.eg);
 
 PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
-TUNE(Range(0, 20), KNIGHT_MOBILITY_BONUS.mg, KNIGHT_MOBILITY_BONUS.eg);
+TUNE(Range(0, 10), KNIGHT_MOBILITY_BONUS.mg, KNIGHT_MOBILITY_BONUS.eg);
 
 PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
-TUNE(Range(0, 20), BISHOP_MOBILITY_BONUS.mg, BISHOP_MOBILITY_BONUS.eg);
+TUNE(Range(0, 10), BISHOP_MOBILITY_BONUS.mg, BISHOP_MOBILITY_BONUS.eg);
 
 PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
-TUNE(Range(0, 20), ROOK_MOBILITY_BONUS.mg, ROOK_MOBILITY_BONUS.eg);
+TUNE(Range(0, 10), ROOK_MOBILITY_BONUS.mg, ROOK_MOBILITY_BONUS.eg);
 
 PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-TUNE(Range(0, 20), QUEEN_MOBILITY_BONUS.mg, QUEEN_MOBILITY_BONUS.eg);
+TUNE(Range(0, 10), QUEEN_MOBILITY_BONUS.mg, QUEEN_MOBILITY_BONUS.eg);
 
 PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
 TUNE(Range(0, 100), KNIGHT_OUTPOST_BONUS.mg, KNIGHT_OUTPOST_BONUS.eg);
@@ -884,19 +884,19 @@ PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
 TUNE(Range(0, 100), BISHOP_OUTPOST_BONUS.mg, BISHOP_OUTPOST_BONUS.eg);
 
 PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-TUNE(Range(0, 50), POTENTIAL_DOMINANCE_BONUS.mg, POTENTIAL_DOMINANCE_BONUS.eg);
+TUNE(Range(0, 20), POTENTIAL_DOMINANCE_BONUS.mg, POTENTIAL_DOMINANCE_BONUS.eg);
 
 PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
 TUNE(Range(0, 100), ROOK_ON_OPEN_FILE.mg, ROOK_ON_OPEN_FILE.eg);
 
 PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-TUNE(Range(0, 100), ROOK_ON_SEMI_OPEN_FILE.mg, ROOK_ON_SEMI_OPEN_FILE.eg);
+TUNE(Range(0, 50), ROOK_ON_SEMI_OPEN_FILE.mg, ROOK_ON_SEMI_OPEN_FILE.eg);
 
 PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
 TUNE(Range(0, 100), RookOnEnemyTerritoryBonus.mg, RookOnEnemyTerritoryBonus.eg);
 
 PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-TUNE(Range(0, 50), ConnectedRooksOnTerritoryBonus.mg, ConnectedRooksOnTerritoryBonus.eg);
+TUNE(Range(0, 40), ConnectedRooksOnTerritoryBonus.mg, ConnectedRooksOnTerritoryBonus.eg);
 
 // Removed const for array tuning
 int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
@@ -904,8 +904,8 @@ int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
 
 static int tune_passer_dist = []() {
      for (int i = 1; i < 7; ++i) { // Skip 0 and 7
-         Tune::instance().add_entry(Range(-50, 50), "PasserMyKingDistance_" + std::to_string(i), PasserMyKingDistance[i]);
-         Tune::instance().add_entry(Range(-50, 50), "PasserEnemyKingDistance_" + std::to_string(i), PasserEnemyKingDistance[i]);
+         Tune::instance().add_entry(Range(-10, 50), "PasserMyKingDistance_" + std::to_string(i), PasserMyKingDistance[i]);
+         Tune::instance().add_entry(Range(-10, 50), "PasserEnemyKingDistance_" + std::to_string(i), PasserEnemyKingDistance[i]);
      }
      return 0;
  }();
@@ -914,13 +914,13 @@ PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
     {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
 };
-TUNE(Range(-200, 200), PasserBlockedBonus);
+TUNE(Range(-80, 120), PasserBlockedBonus);
 
 PhaseScore PasserUnsafeBonus[2][8] = {
     {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
     {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
 };
-TUNE(Range(-200, 200), PasserUnsafeBonus);
+TUNE(Range(-80, 140), PasserUnsafeBonus);
 
 PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} 
@@ -938,23 +938,23 @@ PhaseScore THREAT_BY_ROOK[7] = {
 };
  static int tune_threat_rook = []() {
      for (int i = 1; i < 6; ++i) {
-         Tune::instance().add_entry(Range(0, 100), "threat_rook_mg_" + std::to_string(i), THREAT_BY_ROOK[i].mg);
-         Tune::instance().add_entry(Range(0, 100), "threat_rook_eg_" + std::to_string(i), THREAT_BY_ROOK[i].eg);
+         Tune::instance().add_entry(Range(0, 60), "threat_rook_mg_" + std::to_string(i), THREAT_BY_ROOK[i].mg);
+         Tune::instance().add_entry(Range(0, 60), "threat_rook_eg_" + std::to_string(i), THREAT_BY_ROOK[i].eg);
      }
      return 0;
  }();
 
 PhaseScore THREAT_BY_KING = {6, 21};
-TUNE(Range(0, 100), THREAT_BY_KING.mg, THREAT_BY_KING.eg);
+TUNE(Range(0, 80), THREAT_BY_KING.mg, THREAT_BY_KING.eg);
 
 PhaseScore HANGING_PIECE_BONUS = {18, 10};
-TUNE(Range(0, 100), HANGING_PIECE_BONUS.mg, HANGING_PIECE_BONUS.eg);
+TUNE(Range(0, 80), HANGING_PIECE_BONUS.mg, HANGING_PIECE_BONUS.eg);
 
 PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
-TUNE(Range(0, 50), WEAK_QUEEN_DEFENSE_BONUS.mg, WEAK_QUEEN_DEFENSE_BONUS.eg);
+TUNE(Range(0, 10), WEAK_QUEEN_DEFENSE_BONUS.mg, WEAK_QUEEN_DEFENSE_BONUS.eg);
 
 PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-TUNE(Range(0, 20), RESTRICTED_PIECE_BONUS.mg, RESTRICTED_PIECE_BONUS.eg);
+TUNE(Range(0, 8), RESTRICTED_PIECE_BONUS.mg, RESTRICTED_PIECE_BONUS.eg);
 
 PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
 TUNE(Range(0, 100), SAFE_PAWN_ATTACK_BONUS.mg, SAFE_PAWN_ATTACK_BONUS.eg);
@@ -972,21 +972,21 @@ PhaseScore PhalanxPawnBonus[8][8] = {
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}}
 };
-TUNE(Range(0, 200), PhalanxPawnBonus);
+//TUNE(Range(0, 200), PhalanxPawnBonus);
 
 // --- Evaluation Constants for King Safety ---
 // King Shelter Penalties (Middlegame only)
 int SHIELD_PAWN_PRESENT_BONUS = 10;
-TUNE(Range(0, 100), SHIELD_PAWN_PRESENT_BONUS);
+TUNE(Range(0, 50), SHIELD_PAWN_PRESENT_BONUS);
 
 int SHIELD_PAWN_MISSING_PENALTY = -20;
 TUNE(Range(-100, 0), SHIELD_PAWN_MISSING_PENALTY);
 
 int SHIELD_PAWN_ADVANCED_PENALTY = -12;
-TUNE(Range(-100, 0), SHIELD_PAWN_ADVANCED_PENALTY);
+TUNE(Range(-60, 0), SHIELD_PAWN_ADVANCED_PENALTY);
 
 int SHIELD_OPEN_FILE_PENALTY = -15;
-TUNE(Range(-100, 0), SHIELD_OPEN_FILE_PENALTY);
+TUNE(Range(-60, 0), SHIELD_OPEN_FILE_PENALTY);
 
 int SafetyKnightWeight    = 32;
 int SafetyBishopWeight    = 19;
@@ -1002,17 +1002,17 @@ int SafetySafeQueenCheck  = 66;
 int SafetySafeRookCheck   = 61;
 int SafetySafeBishopCheck = 50;
 int SafetySafeKnightCheck = 58;
-TUNE(Range(0, 100), SafetySafeQueenCheck, SafetySafeRookCheck, SafetySafeBishopCheck, SafetySafeKnightCheck);
+TUNE(Range(0, 120), SafetySafeQueenCheck, SafetySafeRookCheck, SafetySafeBishopCheck, SafetySafeKnightCheck);
 
 int SafetyAdjustment      = -63;
-TUNE(Range(-200, 200), SafetyAdjustment);
+TUNE(Range(-200, 20), SafetyAdjustment);
 
 // Safety divisors (extracted from logic)
 int SafetyDivisor = 716;
 TUNE(Range(100, 2000), SafetyDivisor);
 
 int SafetyLinearDivisor = 19;
-TUNE(Range(1, 100), SafetyLinearDivisor);
+TUNE(Range(1, 60), SafetyLinearDivisor);
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -1655,7 +1655,7 @@ int RAZORING_SLOPE = 78;
 TUNE(Range(0, 200), RAZORING_SLOPE);
 
 int NMP_BASE = 3;
-TUNE(Range(0, 10), NMP_BASE);
+TUNE(Range(0, 6), NMP_BASE);
 
 int NMP_DEPTH_DIVISOR = 4;
 TUNE(Range(1, 10), NMP_DEPTH_DIVISOR);
@@ -2592,3 +2592,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
