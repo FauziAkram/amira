@@ -727,7 +727,7 @@ PhaseScore piece_phase_values[6] = {
 TUNE(Range(0, 2000), piece_phase_values);
 
 
-int see_piece_values[7] = {91, 319, 329, 506, 926, 10000, 16};
+int see_piece_values[7] = {91, 319, 329, 506, 926, 10000, 0};
 TUNE(Range(0, 20000), see_piece_values);
 
 // --- PIECE-SQUARE TABLES ---
@@ -2580,3 +2580,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
