@@ -724,7 +724,13 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 PhaseScore piece_phase_values[6] = {
     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
-TUNE(Range(0, 2000), piece_phase_values);
+ static int tune_piece_phase = []() {
+     for (int i = 0; i < 6; ++i) {
+         Tune::instance().add_entry(Range(0, 2000), "piece_phase_mg_" + std::to_string(i), piece_phase_values[i].mg);
+         Tune::instance().add_entry(Range(0, 2000), "piece_phase_eg_" + std::to_string(i), piece_phase_values[i].eg);
+     }
+     return 0;
+ }();
 
 // removed const for tuning
 int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
@@ -826,7 +832,13 @@ constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
-TUNE(Range(-200, 200), passed_pawn_bonus);
+ static int tune_passed_pawn = []() {
+     for (int i = 0; i < 8; ++i) {
+         Tune::instance().add_entry(Range(-200, 200), "passed_pawn_mg_" + std::to_string(i), passed_pawn_bonus[i].mg);
+         Tune::instance().add_entry(Range(-200, 200), "passed_pawn_eg_" + std::to_string(i), passed_pawn_bonus[i].eg);
+     }
+     return 0;
+ }();
 
 // --- Evaluation Constants ---
 // Removed consts and added TUNE. Splitting PhaseScores components for tuning.
@@ -903,12 +915,24 @@ TUNE(Range(-200, 200), PasserUnsafeBonus);
 PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} 
 };
-TUNE(Range(0, 100), THREAT_BY_MINOR);
+ static int tune_threat_minor = []() {
+     for (int i = 0; i < 7; ++i) {
+         Tune::instance().add_entry(Range(0, 100), "threat_minor_mg_" + std::to_string(i), THREAT_BY_MINOR[i].mg);
+         Tune::instance().add_entry(Range(0, 100), "threat_minor_eg_" + std::to_string(i), THREAT_BY_MINOR[i].eg);
+     }
+     return 0;
+ }();
 
 PhaseScore THREAT_BY_ROOK[7] = {
     {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
 };
-TUNE(Range(0, 100), THREAT_BY_ROOK);
+ static int tune_threat_rook = []() {
+     for (int i = 0; i < 7; ++i) {
+         Tune::instance().add_entry(Range(0, 100), "threat_rook_mg_" + std::to_string(i), THREAT_BY_ROOK[i].mg);
+         Tune::instance().add_entry(Range(0, 100), "threat_rook_eg_" + std::to_string(i), THREAT_BY_ROOK[i].eg);
+     }
+     return 0;
+ }();
 
 PhaseScore THREAT_BY_KING = {6, 21};
 TUNE(Range(0, 100), THREAT_BY_KING.mg, THREAT_BY_KING.eg);
