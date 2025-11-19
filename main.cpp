@@ -720,7 +720,7 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-// removed const for tuning
+
 PhaseScore piece_phase_values[6] = {
     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
@@ -732,7 +732,7 @@ PhaseScore piece_phase_values[6] = {
      return 0;
  }();
 
-// removed const for tuning
+
 int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
  static int tune_see_values = []() {
      for (int i = 0; i < 5; ++i) { // Skip 5 (10000) and 6 (0)
@@ -743,7 +743,7 @@ int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
-// removed const for tuning
+
 PhaseScore pawn_pst[64] = {
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0},
     { -3,   9}, { -2,   8}, {  0,   8}, {  1,   0}, {  1,  11}, { -1,   7}, { -2,   8}, { -5,   5},
@@ -754,9 +754,9 @@ PhaseScore pawn_pst[64] = {
     { -1, -31}, {-32,  -1}, { -9, -15}, { 71,  -1}, { 48,  -9}, { 31,  -6}, {-12,  11}, { -1, -12},
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}
 };
-TUNE(Range(-200, 200), pawn_pst);
+//TUNE(Range(-200, 200), pawn_pst);
 
-// removed const for tuning
+
 PhaseScore knight_pst[64] = {
     {-72, -62}, {-39, -39}, {-35, -32}, {-34, -19}, {-33, -19}, {-36, -31}, {-40, -39}, {-76, -61},
     {-33, -35}, {-18, -14}, { -6, -17}, { -0,   7}, {  0,   7}, { -8, -16}, {-17, -17}, {-36, -26},
@@ -767,9 +767,9 @@ PhaseScore knight_pst[64] = {
     {-34, -21}, {-25,  -9}, {  7, -16}, { 14,   6}, { 15,   6}, {  7, -13}, {-26,  -9}, {-36, -21},
     {-109,-59}, {-60, -33}, {-60, -20}, {-32, -12}, {-28, -11}, {-56, -18}, {-67, -29}, {-109, -58}
 };
-TUNE(Range(-200, 200), knight_pst);
+//TUNE(Range(-200, 200), knight_pst);
 
-// removed const for tuning
+
 PhaseScore bishop_pst[64] = {
     {-20, -24}, { -7, -11}, { -8, -10}, { -7,  -6}, { -7,  -5}, { -9, -10}, { -8, -11}, {-19, -25},
     {  2, -16}, {  3, -24}, {  4,  -4}, {  4,   2}, {  4,   2}, {  5,  -4}, {  6, -24}, {  2, -25},
@@ -780,9 +780,9 @@ PhaseScore bishop_pst[64] = {
     {-23,  -3}, {-37,   5}, {-10,   5}, {-26,  11}, {-26,  11}, {-10,   8}, {-51,   5}, {-44,  -2},
     {-38, -14}, {-51,  -8}, {-94,   5}, {-83,   9}, {-85,   8}, {-71,  -0}, {-43,  -7}, {-62, -15}
 };
-TUNE(Range(-200, 200), bishop_pst);
+//TUNE(Range(-200, 200), bishop_pst);
 
-// removed const for tuning
+
 PhaseScore rook_pst[64] = {
     {-18,  -0}, {-18,   1}, {-12,   1}, { -5,  -3}, { -4,  -3}, { -9,   1}, {-12,  -1}, {-17,  -8},
     {-28,  -3}, {-20,  -9}, {-14,  -6}, { -7,  -9}, { -6, -10}, {-15, -12}, {-18, -14}, {-28,  -1},
@@ -793,9 +793,9 @@ PhaseScore rook_pst[64] = {
     { -5,  18}, {-18,  29}, { -1,  27}, { 15,  28}, { 14,  28}, { -1,  27}, {-21,  30}, { -4,  18},
     {  2,  21}, { 15,  34}, { -0,  42}, {  8,  38}, {  9,  38}, {  0,  40}, { 23,  33}, {  4,  22}
 };
-TUNE(Range(-200, 200), rook_pst);
+//TUNE(Range(-200, 200), rook_pst);
 
-// removed const for tuning
+
 PhaseScore queen_pst[64] = {
     { -3, -39}, { -3, -29}, { -2, -27}, {  4, -15}, {  4, -16}, { -1, -31}, { -2, -29}, { -2, -44},
     { -2, -26}, {  4, -17}, {  7, -34}, {  7,  -1}, {  8,  -1}, {  7, -35}, {  4, -26}, { -3, -27},
@@ -806,9 +806,9 @@ PhaseScore queen_pst[64] = {
     {-13,  -5}, {-54,  31}, {-16,  14}, {-40,  63}, {-42,  65}, {-15,  14}, {-53,  35}, {-12,   7},
     {  2, -14}, { -3,   0}, { -0,   6}, { -1,   9}, { -3,  13}, {  7,   0}, { -5,   8}, { -2,  -1}
 };
-TUNE(Range(-200, 200), queen_pst);
+//TUNE(Range(-200, 200), queen_pst);
 
-// removed const for tuning
+
 PhaseScore king_pst[64] = {
     {134, -58}, {147,  -1}, {126,  35}, { 58,  30}, { 58,  30}, {127,  36}, {150,  -1}, {135, -59},
     {114,  19}, { 92,  44}, { 65,  79}, { 33,  69}, { 36,  70}, { 63,  79}, { 93,  44}, {113,  18},
@@ -819,7 +819,7 @@ PhaseScore king_pst[64] = {
     { 38, -10}, { 60,  47}, { 32,  48}, {  3,  50}, { -4,  49}, { 34,  48}, { 60,  47}, { 34, -12},
     { 21, -38}, { 50,  -9}, { 10,  -2}, { -2,   8}, { -5,   7}, {  0,  -2}, { 51, -10}, {  1, -38}
 };
-TUNE(Range(-200, 200), king_pst);
+//TUNE(Range(-200, 200), king_pst);
 
 const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
 const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
@@ -833,7 +833,7 @@ uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
-// removed const for tuning
+
 PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
@@ -2592,4 +2592,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
