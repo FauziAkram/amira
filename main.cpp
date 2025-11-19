@@ -725,7 +725,7 @@ PhaseScore piece_phase_values[6] = {
     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
  static int tune_piece_phase = []() {
-     for (int i = 0; i < 6; ++i) {
+     for (int i = 0; i < 5; ++i) {
          Tune::instance().add_entry(Range(0, 2000), "piece_phase_mg_" + std::to_string(i), piece_phase_values[i].mg);
          Tune::instance().add_entry(Range(0, 2000), "piece_phase_eg_" + std::to_string(i), piece_phase_values[i].eg);
      }
@@ -734,7 +734,12 @@ PhaseScore piece_phase_values[6] = {
 
 // removed const for tuning
 int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
-TUNE(Range(0, 20000), see_piece_values);
+ static int tune_see_values = []() {
+     for (int i = 0; i < 5; ++i) { // Skip 5 (10000) and 6 (0)
+         Tune::instance().add_entry(Range(0, 1500), "see_piece_values_" + std::to_string(i), see_piece_values[i]);
+     }
+     return 0;
+ }();
 
 // --- PIECE-SQUARE TABLES ---
 
@@ -833,7 +838,7 @@ PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
  static int tune_passed_pawn = []() {
-     for (int i = 0; i < 8; ++i) {
+     for (int i = 1; i < 7; ++i) {
          Tune::instance().add_entry(Range(-200, 200), "passed_pawn_mg_" + std::to_string(i), passed_pawn_bonus[i].mg);
          Tune::instance().add_entry(Range(-200, 200), "passed_pawn_eg_" + std::to_string(i), passed_pawn_bonus[i].eg);
      }
@@ -895,10 +900,15 @@ TUNE(Range(0, 50), ConnectedRooksOnTerritoryBonus.mg, ConnectedRooksOnTerritoryB
 
 // Removed const for array tuning
 int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
-TUNE(Range(-50, 50), PasserMyKingDistance);
-
 int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
-TUNE(Range(-50, 50), PasserEnemyKingDistance);
+
+static int tune_passer_dist = []() {
+     for (int i = 1; i < 7; ++i) { // Skip 0 and 7
+         Tune::instance().add_entry(Range(-50, 50), "PasserMyKingDistance_" + std::to_string(i), PasserMyKingDistance[i]);
+         Tune::instance().add_entry(Range(-50, 50), "PasserEnemyKingDistance_" + std::to_string(i), PasserEnemyKingDistance[i]);
+     }
+     return 0;
+ }();
 
 PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
@@ -916,7 +926,7 @@ PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} 
 };
  static int tune_threat_minor = []() {
-     for (int i = 0; i < 7; ++i) {
+     for (int i = 1; i < 6; ++i) {
          Tune::instance().add_entry(Range(0, 100), "threat_minor_mg_" + std::to_string(i), THREAT_BY_MINOR[i].mg);
          Tune::instance().add_entry(Range(0, 100), "threat_minor_eg_" + std::to_string(i), THREAT_BY_MINOR[i].eg);
      }
@@ -927,7 +937,7 @@ PhaseScore THREAT_BY_ROOK[7] = {
     {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
 };
  static int tune_threat_rook = []() {
-     for (int i = 0; i < 7; ++i) {
+     for (int i = 1; i < 6; ++i) {
          Tune::instance().add_entry(Range(0, 100), "threat_rook_mg_" + std::to_string(i), THREAT_BY_ROOK[i].mg);
          Tune::instance().add_entry(Range(0, 100), "threat_rook_eg_" + std::to_string(i), THREAT_BY_ROOK[i].eg);
      }
@@ -2582,3 +2592,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
