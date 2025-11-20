@@ -4,11 +4,13 @@
 #include <sstream>
 #include <chrono>
 #include <algorithm>
-#include <cstring> // For std::memset
+#include <cstring> 
 #include <cstdint>
-#include <random>   // For std::mt19937_64
-#include <cctype>   // For std::isdigit, std::islower, std::tolower
-#include <cmath>    // For std::log
+#include <random>   
+#include <cctype>   
+#include <cmath>    
+
+#include "tune.h" // Requires tune.h in the same directory
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -59,17 +61,17 @@ struct PhaseScore {
 enum Piece { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, NO_PIECE };
 enum Color { WHITE, BLACK, NO_COLOR };
 
-constexpr uint8_t EMPTY_SQUARE = 31; // A value outside the piece-color range
+constexpr uint8_t EMPTY_SQUARE = 31; 
 inline uint8_t make_piece(Piece type, Color color) { return (uint8_t)type * 4 + (uint8_t)color; }
 inline Piece get_piece_type(uint8_t piece) { return (Piece)(piece / 4); }
 inline Color get_piece_color(uint8_t piece) { return (Color)(piece % 4); }
 constexpr int MAX_PLY = 128;
 constexpr int TT_SIZE_MB_DEFAULT = 512;
-constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; // 2^17 entries
+constexpr int PAWN_CACHE_SIZE_ENTRIES = 131072; 
 constexpr int MATE_SCORE = 30000;
 constexpr int MATE_THRESHOLD = MATE_SCORE - MAX_PLY;
 constexpr int INF_SCORE = 32000;
-constexpr int NO_EVAL_STORED = INF_SCORE + 1; // A value that evaluate() should not return
+constexpr int NO_EVAL_STORED = INF_SCORE + 1; 
 
 // Castling rights masks
 constexpr uint8_t WK_CASTLE_MASK = 1;
@@ -77,11 +79,11 @@ constexpr uint8_t WQ_CASTLE_MASK = 2;
 constexpr uint8_t BK_CASTLE_MASK = 4;
 constexpr uint8_t BQ_CASTLE_MASK = 8;
 
-// Rook and King starting squares (standard chess)
+// Rook and King starting squares 
 constexpr int A1_SQ = 0; constexpr int E1_SQ = 4; constexpr int H1_SQ = 7;
-constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; // White castled king squares
+constexpr int G1_SQ = 6; constexpr int C1_SQ = 2; 
 constexpr int A8_SQ = 56; constexpr int E8_SQ = 60; constexpr int H8_SQ = 63;
-constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; // Black castled king squares
+constexpr int G8_SQ = 62; constexpr int C8_SQ = 58; 
 constexpr uint64_t WK_CASTLE_PATH = (1ULL << (E1_SQ + 1)) | (1ULL << (E1_SQ + 2));
 constexpr uint64_t WQ_CASTLE_PATH = (1ULL << (E1_SQ - 1)) | (1ULL << (E1_SQ - 2)) | (1ULL << (E1_SQ - 3));
 constexpr uint64_t BK_CASTLE_PATH = (1ULL << (E8_SQ + 1)) | (1ULL << (E8_SQ + 2));
@@ -90,7 +92,7 @@ constexpr uint64_t BQ_CASTLE_PATH = (1ULL << (E8_SQ - 1)) | (1ULL << (E8_SQ - 2)
 // Forward Declarations
 struct Move;
 struct Position;
-int evaluate(Position& pos); // Made non-const to update pawn cache stats
+int evaluate(Position& pos); 
 bool is_square_attacked(const Position& pos, int sq, int attacker_color);
 int generate_moves(const Position& pos, Move* moves_list, bool captures_only);
 Position make_move(const Position& pos, const Move& move, bool& legal);
@@ -123,7 +125,7 @@ void clear_pawn_cache() {
 // --- Zobrist Hashing ---
 uint64_t zobrist_pieces[2][6][64];
 uint64_t zobrist_castling[16];
-uint64_t zobrist_ep[65]; // 64 squares + 1 for no EP square (index 64)
+uint64_t zobrist_ep[65]; 
 uint64_t zobrist_side_to_move;
 std::mt19937_64 rng_zobrist(0xCEC);
 
@@ -179,11 +181,11 @@ struct Position {
     int ep_square;
     uint8_t castling_rights;
     uint64_t zobrist_hash;
-    uint64_t pawn_zobrist_key; // For pawn cache
+    uint64_t pawn_zobrist_key; 
     int halfmove_clock;
     int fullmove_number;
     int ply;
-    int static_eval; // Store the last evaluation for dynamic LMR
+    int static_eval; 
 
     Position() : side_to_move(WHITE), ep_square(-1), castling_rights(0),
                  zobrist_hash(0), pawn_zobrist_key(0), halfmove_clock(0),
@@ -718,14 +720,31 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-const PhaseScore piece_phase_values[6] = {
+
+PhaseScore piece_phase_values[6] = {
     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
-const int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
+ static int tune_piece_phase = []() {
+     for (int i = 0; i < 5; ++i) {
+         Tune::instance().add_entry(Range(0, 2000), "piece_phase_mg_" + std::to_string(i), piece_phase_values[i].mg);
+         Tune::instance().add_entry(Range(0, 2000), "piece_phase_eg_" + std::to_string(i), piece_phase_values[i].eg);
+     }
+     return 0;
+ }();
+
+
+int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
+ static int tune_see_values = []() {
+     for (int i = 0; i < 5; ++i) { // Skip 5 (10000) and 6 (0)
+         Tune::instance().add_entry(Range(0, 2000), "see_piece_values_" + std::to_string(i), see_piece_values[i]);
+     }
+     return 0;
+ }();
 
 // --- PIECE-SQUARE TABLES ---
 
-const PhaseScore pawn_pst[64] = {
+
+PhaseScore pawn_pst[64] = {
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0},
     { -3,   9}, { -2,   8}, {  0,   8}, {  1,   0}, {  1,  11}, { -1,   7}, { -2,   8}, { -5,   5},
     { -5,   3}, { -8,   4}, {  2,  -3}, { 13,  -3}, { 17,  -3}, {  8,  -1}, { -3,  -4}, {-12,   0},
@@ -735,7 +754,10 @@ const PhaseScore pawn_pst[64] = {
     { -1, -31}, {-32,  -1}, { -9, -15}, { 71,  -1}, { 48,  -9}, { 31,  -6}, {-12,  11}, { -1, -12},
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}
 };
-const PhaseScore knight_pst[64] = {
+//TUNE(Range(-200, 200), pawn_pst);
+
+
+PhaseScore knight_pst[64] = {
     {-72, -62}, {-39, -39}, {-35, -32}, {-34, -19}, {-33, -19}, {-36, -31}, {-40, -39}, {-76, -61},
     {-33, -35}, {-18, -14}, { -6, -17}, { -0,   7}, {  0,   7}, { -8, -16}, {-17, -17}, {-36, -26},
     {-28, -28}, {  0,  -6}, {  9,   4}, { 14,  24}, { 14,  24}, {  5,   3}, { -3,  -6}, {-30, -27},
@@ -745,7 +767,10 @@ const PhaseScore knight_pst[64] = {
     {-34, -21}, {-25,  -9}, {  7, -16}, { 14,   6}, { 15,   6}, {  7, -13}, {-26,  -9}, {-36, -21},
     {-109,-59}, {-60, -33}, {-60, -20}, {-32, -12}, {-28, -11}, {-56, -18}, {-67, -29}, {-109, -58}
 };
-const PhaseScore bishop_pst[64] = {
+//TUNE(Range(-200, 200), knight_pst);
+
+
+PhaseScore bishop_pst[64] = {
     {-20, -24}, { -7, -11}, { -8, -10}, { -7,  -6}, { -7,  -5}, { -9, -10}, { -8, -11}, {-19, -25},
     {  2, -16}, {  3, -24}, {  4,  -4}, {  4,   2}, {  4,   2}, {  5,  -4}, {  6, -24}, {  2, -25},
     { -5,  -7}, {  9,   2}, { -1,   3}, { 12,  12}, { 12,  13}, { -1,   2}, {  9,   3}, { -3,  -6},
@@ -755,7 +780,10 @@ const PhaseScore bishop_pst[64] = {
     {-23,  -3}, {-37,   5}, {-10,   5}, {-26,  11}, {-26,  11}, {-10,   8}, {-51,   5}, {-44,  -2},
     {-38, -14}, {-51,  -8}, {-94,   5}, {-83,   9}, {-85,   8}, {-71,  -0}, {-43,  -7}, {-62, -15}
 };
-const PhaseScore rook_pst[64] = {
+//TUNE(Range(-200, 200), bishop_pst);
+
+
+PhaseScore rook_pst[64] = {
     {-18,  -0}, {-18,   1}, {-12,   1}, { -5,  -3}, { -4,  -3}, { -9,   1}, {-12,  -1}, {-17,  -8},
     {-28,  -3}, {-20,  -9}, {-14,  -6}, { -7,  -9}, { -6, -10}, {-15, -12}, {-18, -14}, {-28,  -1},
     {-19,  -3}, {-13,   7}, {-24,   6}, {-12,   0}, {-10,   1}, {-25,   5}, { -5,   6}, {-19,  -1},
@@ -765,7 +793,10 @@ const PhaseScore rook_pst[64] = {
     { -5,  18}, {-18,  29}, { -1,  27}, { 15,  28}, { 14,  28}, { -1,  27}, {-21,  30}, { -4,  18},
     {  2,  21}, { 15,  34}, { -0,  42}, {  8,  38}, {  9,  38}, {  0,  40}, { 23,  33}, {  4,  22}
 };
-const PhaseScore queen_pst[64] = {
+//TUNE(Range(-200, 200), rook_pst);
+
+
+PhaseScore queen_pst[64] = {
     { -3, -39}, { -3, -29}, { -2, -27}, {  4, -15}, {  4, -16}, { -1, -31}, { -2, -29}, { -2, -44},
     { -2, -26}, {  4, -17}, {  7, -34}, {  7,  -1}, {  8,  -1}, {  7, -35}, {  4, -26}, { -3, -27},
     { -2, -15}, {  5,  -6}, {  5,   6}, {  1,  17}, {  3,  17}, {  5,   8}, {  6,  -5}, { -2, -16},
@@ -775,7 +806,10 @@ const PhaseScore queen_pst[64] = {
     {-13,  -5}, {-54,  31}, {-16,  14}, {-40,  63}, {-42,  65}, {-15,  14}, {-53,  35}, {-12,   7},
     {  2, -14}, { -3,   0}, { -0,   6}, { -1,   9}, { -3,  13}, {  7,   0}, { -5,   8}, { -2,  -1}
 };
-const PhaseScore king_pst[64] = {
+//TUNE(Range(-200, 200), queen_pst);
+
+
+PhaseScore king_pst[64] = {
     {134, -58}, {147,  -1}, {126,  35}, { 58,  30}, { 58,  30}, {127,  36}, {150,  -1}, {135, -59},
     {114,  19}, { 92,  44}, { 65,  79}, { 33,  69}, { 36,  70}, { 63,  79}, { 93,  44}, {113,  18},
     { 59,  33}, { 86,  55}, { 75,  84}, { 51,  99}, { 55,  98}, { 74,  85}, { 88,  56}, { 60,  34},
@@ -785,6 +819,7 @@ const PhaseScore king_pst[64] = {
     { 38, -10}, { 60,  47}, { 32,  48}, {  3,  50}, { -4,  49}, { 34,  48}, { 60,  47}, { 34, -12},
     { 21, -38}, { 50,  -9}, { 10,  -2}, { -2,   8}, { -5,   7}, {  0,  -2}, { 51, -10}, {  1, -38}
 };
+//TUNE(Range(-200, 200), king_pst);
 
 const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
 const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
@@ -798,51 +833,144 @@ uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
-const PhaseScore passed_pawn_bonus[8] = {
+
+PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
+ static int tune_passed_pawn = []() {
+     for (int i = 1; i < 7; ++i) {
+         Tune::instance().add_entry(Range(-200, 200), "passed_pawn_mg_" + std::to_string(i), passed_pawn_bonus[i].mg);
+         Tune::instance().add_entry(Range(-200, 200), "passed_pawn_eg_" + std::to_string(i), passed_pawn_bonus[i].eg);
+     }
+     return 0;
+ }();
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
-const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
-const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
-const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
-const PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
-const PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
-const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
-const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
-const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-const PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
-const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-const int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
-const int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
-const PhaseScore PasserBlockedBonus[2][8] = {
+// Removed consts and added TUNE. Splitting PhaseScores components for tuning.
+PhaseScore TEMPO_BONUS                   = {15, 15};
+TUNE(Range(0, 60), TEMPO_BONUS.mg, TEMPO_BONUS.eg);
+
+PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
+TUNE(Range(0, 200), BISHOP_PAIR_BONUS.mg, BISHOP_PAIR_BONUS.eg);
+
+PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
+TUNE(Range(0, 60), PROTECTED_PAWN_BONUS.mg, PROTECTED_PAWN_BONUS.eg);
+
+PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
+TUNE(Range(-100, 0), ISOLATED_PAWN_PENALTY.mg, ISOLATED_PAWN_PENALTY.eg);
+
+PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
+TUNE(Range(-100, 0), DOUBLED_PAWN_PENALTY.mg, DOUBLED_PAWN_PENALTY.eg);
+
+PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
+TUNE(Range(-80, 0), BACKWARD_PAWN_PENALTY.mg, BACKWARD_PAWN_PENALTY.eg);
+
+PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
+TUNE(Range(0, 10), KNIGHT_MOBILITY_BONUS.mg, KNIGHT_MOBILITY_BONUS.eg);
+
+PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
+TUNE(Range(0, 10), BISHOP_MOBILITY_BONUS.mg, BISHOP_MOBILITY_BONUS.eg);
+
+PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
+TUNE(Range(0, 10), ROOK_MOBILITY_BONUS.mg, ROOK_MOBILITY_BONUS.eg);
+
+PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
+TUNE(Range(0, 10), QUEEN_MOBILITY_BONUS.mg, QUEEN_MOBILITY_BONUS.eg);
+
+PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
+TUNE(Range(0, 100), KNIGHT_OUTPOST_BONUS.mg, KNIGHT_OUTPOST_BONUS.eg);
+
+PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
+TUNE(Range(0, 100), BISHOP_OUTPOST_BONUS.mg, BISHOP_OUTPOST_BONUS.eg);
+
+PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
+TUNE(Range(0, 20), POTENTIAL_DOMINANCE_BONUS.mg, POTENTIAL_DOMINANCE_BONUS.eg);
+
+PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
+TUNE(Range(0, 100), ROOK_ON_OPEN_FILE.mg, ROOK_ON_OPEN_FILE.eg);
+
+PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
+TUNE(Range(0, 50), ROOK_ON_SEMI_OPEN_FILE.mg, ROOK_ON_SEMI_OPEN_FILE.eg);
+
+PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
+TUNE(Range(0, 100), RookOnEnemyTerritoryBonus.mg, RookOnEnemyTerritoryBonus.eg);
+
+PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
+TUNE(Range(0, 40), ConnectedRooksOnTerritoryBonus.mg, ConnectedRooksOnTerritoryBonus.eg);
+
+// Removed const for array tuning
+int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
+int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
+
+static int tune_passer_dist = []() {
+     for (int i = 1; i < 7; ++i) { // Skip 0 and 7
+         Tune::instance().add_entry(Range(-10, 50), "PasserMyKingDistance_" + std::to_string(i), PasserMyKingDistance[i]);
+         Tune::instance().add_entry(Range(-10, 50), "PasserEnemyKingDistance_" + std::to_string(i), PasserEnemyKingDistance[i]);
+     }
+     return 0;
+ }();
+
+PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
     {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
 };
-const PhaseScore PasserUnsafeBonus[2][8] = {
+TUNE(Range(-80, 120), PasserBlockedBonus);
+
+PhaseScore PasserUnsafeBonus[2][8] = {
     {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
     {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
 };
-const PhaseScore THREAT_BY_MINOR[7] = {
-    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
+ static int tune_passer_unsafe = []() {
+     for (int r = 0; r < 2; ++r) {
+         for (int f = 1; f < 7; ++f) { // Skip 0 and 7
+             Tune::instance().add_entry(Range(-80, 140), "PasserUnsafeBonus_mg_" + std::to_string(r) + "_" + std::to_string(f), PasserUnsafeBonus[r][f].mg);
+             Tune::instance().add_entry(Range(-80, 140), "PasserUnsafeBonus_eg_" + std::to_string(r) + "_" + std::to_string(f), PasserUnsafeBonus[r][f].eg);
+         }
+     }
+     return 0;
+ }();
+
+PhaseScore THREAT_BY_MINOR[7] = {
+    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} 
 };
-const PhaseScore THREAT_BY_ROOK[7] = {
+ static int tune_threat_minor = []() {
+     for (int i = 1; i < 6; ++i) {
+         Tune::instance().add_entry(Range(0, 100), "threat_minor_mg_" + std::to_string(i), THREAT_BY_MINOR[i].mg);
+         Tune::instance().add_entry(Range(0, 100), "threat_minor_eg_" + std::to_string(i), THREAT_BY_MINOR[i].eg);
+     }
+     return 0;
+ }();
+
+PhaseScore THREAT_BY_ROOK[7] = {
     {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
 };
-const PhaseScore THREAT_BY_KING = {6, 21};
-const PhaseScore HANGING_PIECE_BONUS = {18, 10};
-const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
-const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
-const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
-const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
+ static int tune_threat_rook = []() {
+     for (int i = 1; i < 6; ++i) {
+         Tune::instance().add_entry(Range(0, 60), "threat_rook_mg_" + std::to_string(i), THREAT_BY_ROOK[i].mg);
+         Tune::instance().add_entry(Range(0, 60), "threat_rook_eg_" + std::to_string(i), THREAT_BY_ROOK[i].eg);
+     }
+     return 0;
+ }();
+
+PhaseScore THREAT_BY_KING = {6, 21};
+TUNE(Range(0, 80), THREAT_BY_KING.mg, THREAT_BY_KING.eg);
+
+PhaseScore HANGING_PIECE_BONUS = {18, 10};
+TUNE(Range(0, 80), HANGING_PIECE_BONUS.mg, HANGING_PIECE_BONUS.eg);
+
+PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
+TUNE(Range(-2, 8), WEAK_QUEEN_DEFENSE_BONUS.mg, WEAK_QUEEN_DEFENSE_BONUS.eg);
+
+PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
+TUNE(Range(0, 8), RESTRICTED_PIECE_BONUS.mg, RESTRICTED_PIECE_BONUS.eg);
+
+PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
+TUNE(Range(0, 100), SAFE_PAWN_ATTACK_BONUS.mg, SAFE_PAWN_ATTACK_BONUS.eg);
+
+PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+TUNE(Range(0, 50), PAWN_PUSH_THREAT_BONUS.mg, PAWN_PUSH_THREAT_BONUS.eg);
+
+PhaseScore PhalanxPawnBonus[8][8] = { 
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 7, 12}, {20, 20}, {37, 46}, {78, 104}, { 0, 0}},
@@ -852,24 +980,47 @@ const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}}
 };
+//TUNE(Range(0, 200), PhalanxPawnBonus);
 
 // --- Evaluation Constants for King Safety ---
 // King Shelter Penalties (Middlegame only)
-const int SHIELD_PAWN_PRESENT_BONUS = 10;
-const int SHIELD_PAWN_MISSING_PENALTY = -20;
-const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
-const int SHIELD_OPEN_FILE_PENALTY = -15;
-const int SafetyKnightWeight    = 32;
-const int SafetyBishopWeight    = 19;
-const int SafetyRookWeight      = 27;
-const int SafetyQueenWeight     = 23;
-const int SafetyAttackValue     = 32;
-const int SafetyWeakSquares     = 39;
-const int SafetySafeQueenCheck  = 66;
-const int SafetySafeRookCheck   = 61;
-const int SafetySafeBishopCheck = 50;
-const int SafetySafeKnightCheck = 58;
-const int SafetyAdjustment      = -63;
+int SHIELD_PAWN_PRESENT_BONUS = 10;
+TUNE(Range(0, 50), SHIELD_PAWN_PRESENT_BONUS);
+
+int SHIELD_PAWN_MISSING_PENALTY = -20;
+TUNE(Range(-100, 0), SHIELD_PAWN_MISSING_PENALTY);
+
+int SHIELD_PAWN_ADVANCED_PENALTY = -12;
+TUNE(Range(-60, 0), SHIELD_PAWN_ADVANCED_PENALTY);
+
+int SHIELD_OPEN_FILE_PENALTY = -15;
+TUNE(Range(-60, 0), SHIELD_OPEN_FILE_PENALTY);
+
+int SafetyKnightWeight    = 32;
+int SafetyBishopWeight    = 19;
+int SafetyRookWeight      = 27;
+int SafetyQueenWeight     = 23;
+TUNE(Range(0, 100), SafetyKnightWeight, SafetyBishopWeight, SafetyRookWeight, SafetyQueenWeight);
+
+int SafetyAttackValue     = 32;
+int SafetyWeakSquares     = 39;
+TUNE(Range(0, 100), SafetyAttackValue, SafetyWeakSquares);
+
+int SafetySafeQueenCheck  = 66;
+int SafetySafeRookCheck   = 61;
+int SafetySafeBishopCheck = 50;
+int SafetySafeKnightCheck = 58;
+TUNE(Range(0, 120), SafetySafeQueenCheck, SafetySafeRookCheck, SafetySafeBishopCheck, SafetySafeKnightCheck);
+
+int SafetyAdjustment      = -63;
+TUNE(Range(-200, 20), SafetyAdjustment);
+
+// Safety divisors (extracted from logic)
+int SafetyDivisor = 716;
+TUNE(Range(100, 2000), SafetyDivisor);
+
+int SafetyLinearDivisor = 19;
+TUNE(Range(1, 60), SafetyLinearDivisor);
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -902,8 +1053,7 @@ void init_eval_masks() {
             if (f < 7) black_passed_pawn_block_mask[sq] |= set_bit(cur_r * 8 + (f + 1));
         }
 
-        // Outpost defense masks: Squares on adjacent files "behind" the outpost square from enemy's view.
-        // This is equivalent to the squares on adjacent files that are part of the *enemy's* passed pawn blocking mask for that square.
+        // Outpost defense masks
         pawn_attack_shield_mask[WHITE][sq] = black_passed_pawn_block_mask[sq] & adjacent_files_mask[f];
         pawn_attack_shield_mask[BLACK][sq] = white_passed_pawn_block_mask[sq] & adjacent_files_mask[f];
     }
@@ -911,10 +1061,8 @@ void init_eval_masks() {
 
 // Checks for draw by insufficient material.
 bool is_insufficient_material(const Position& pos) {
-    // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
     if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) return false;
 
-    // Count minor pieces for both sides
     int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
     int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
     int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
@@ -922,20 +1070,11 @@ bool is_insufficient_material(const Position& pos) {
     int white_minors = white_knights + white_bishops;
     int black_minors = black_knights + black_bishops;
 
-    // Case: K vs K
     if (white_minors == 0 && black_minors == 0) return true;
-
-    // Case: K + minor vs K
     if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) return true;
-
-    // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
     if (white_minors == 1 && black_minors == 1) return true;
-
-    // Case: K+N+N vs K (generally treated as a draw)
     if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
         (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
-
-    // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
     return false;
 }
 
@@ -982,7 +1121,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         // Backward Pawn Evaluation
         uint64_t front_span = (current_eval_color == WHITE) ? white_passed_pawn_block_mask[sq] : black_passed_pawn_block_mask[sq];
         uint64_t adjacent_pawns = adjacent_files_mask[f] & all_friendly_pawns;
-        if ((front_span & adjacent_pawns) == 0) { // No pawns on adjacent files ahead of us
+        if ((front_span & adjacent_pawns) == 0) { 
             int push_sq = (current_eval_color == WHITE) ? sq + 8 : sq - 8;
             if (get_bit(enemy_pawn_attacks, push_sq))
                 pawn_score += BACKWARD_PAWN_PENALTY;
@@ -1004,10 +1143,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
 }
 
 // --- Endgame Scaling ---
-// Scales the evaluation in the endgame to account for drawish tendencies.
-// Returns a factor from 0 to 256. 256 means no change.
 int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) {
-    // If there are major pieces or many minor pieces, it's not a simple endgame.
     if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) != 0) {
          int white_pieces = pop_count(pos.color_bb[WHITE]);
          int black_pieces = pop_count(pos.color_bb[BLACK]);
@@ -1017,7 +1153,6 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
     int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
     
-    // Opposite-colored bishops endgame
     if (white_bishops == 1 && black_bishops == 1) {
         uint64_t w_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[WHITE];
         uint64_t b_b_bb = pos.piece_bb[BISHOP] & pos.color_bb[BLACK];
@@ -1025,41 +1160,34 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
         bool b_b_is_light = get_bit(LIGHT_SQUARES, lsb_index(b_b_bb));
 
         if (w_b_is_light != b_b_is_light) {
-            // Significant draw factor for OCB endgames
             return 140;
         }
     }
 
-    // Determine the stronger side
     int stronger_side = (score.mg + score.eg > 0) ? WHITE : BLACK;
     int weaker_side = 1 - stronger_side;
     
     uint64_t stronger_side_pawns = pos.piece_bb[PAWN] & pos.color_bb[stronger_side];
     int pawn_advantage = pop_count(stronger_side_pawns) - pop_count(pos.piece_bb[PAWN] & pos.color_bb[weaker_side]);
     
-    // If the stronger side is only up a single pawn, and has no major pieces, it's often a draw.
     if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1)
         return 160;
 
-    // Scale based on the number of pawns for the stronger side.
-    // Winning with few pawns is harder.
     int num_stronger_pawns = pop_count(stronger_side_pawns);
     return std::min(256, 192 + num_stronger_pawns * 20);
 }
 
 // --- Threat Evaluation ---
-// This function calculates bonuses for various types of threats a side can create.
-// It requires fully populated attack maps for both sides to work correctly.
 PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint64_t attackedBy[2][7], const uint64_t attackedBy2[2]) {
     PhaseScore score = {};
     const Color them = (Color)(1 - us);
     uint64_t non_pawn_enemies = pos.color_bb[them] & ~pos.piece_bb[PAWN];
     uint64_t strongly_protected_by_them = attackedBy[them][PAWN] | (attackedBy2[them] & ~attackedBy2[us]);
-    uint64_t weak_enemy_pieces = pos.color_bb[them] & ~strongly_protected_by_them & attackedBy[us][6]; // 6 is ALL_PIECES
+    uint64_t weak_enemy_pieces = pos.color_bb[them] & ~strongly_protected_by_them & attackedBy[us][6]; 
     uint64_t defended_enemy_pieces = non_pawn_enemies & strongly_protected_by_them;
     uint64_t all_targets = weak_enemy_pieces | defended_enemy_pieces;
 
-    if (!all_targets) return score; // Early exit if no pieces are targeted
+    if (!all_targets) return score; 
 
     // Threats by minor pieces (Knights and Bishops)
     uint64_t b = all_targets & (attackedBy[us][KNIGHT] | attackedBy[us][BISHOP]);
@@ -1384,8 +1512,9 @@ int evaluate(Position& pos) {
                 safety_score += SafetySafeKnightCheck * pop_count(knight_checks);
                 safety_score += SafetyAdjustment;
 
-                current_color_score.mg -= safety_score * safety_score / 716;
-                current_color_score.eg -= safety_score / 19;
+                // Uses SafetyDivisor and SafetyLinearDivisor (tuned constants)
+                current_color_score.mg -= safety_score * safety_score / SafetyDivisor;
+                current_color_score.eg -= safety_score / SafetyLinearDivisor;
             }
         }
 
@@ -1518,13 +1647,38 @@ int16_t history_score[2][2][2][64][64]; // [color][from_threat][to_threat][from]
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
 int late_move_pruning_counts[2][MAX_PLY]; // For Late Move Pruning [improving][depth]
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
-constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
+
+// Extracted Tunable Search Constants
+int TACTICAL_LOOKAHEAD_REDUCTION = 4;
+TUNE(Range(0, 10), TACTICAL_LOOKAHEAD_REDUCTION);
+
+// Reduction margins / bases
+int RFP_MARGIN_BASE = 64;
+TUNE(Range(0, 200), RFP_MARGIN_BASE);
+
+int RAZORING_BASE = 182;
+TUNE(Range(0, 500), RAZORING_BASE);
+
+int RAZORING_SLOPE = 78;
+TUNE(Range(0, 200), RAZORING_SLOPE);
+
+int NMP_BASE = 3;
+TUNE(Range(0, 6), NMP_BASE);
+
+int NMP_DEPTH_DIVISOR = 4;
+TUNE(Range(1, 10), NMP_DEPTH_DIVISOR);
+
+int SEE_PRUNING_MULTIPLIER = 75; // Used as negative
+TUNE(Range(0, 200), SEE_PRUNING_MULTIPLIER);
+
+int LMR_DIVISOR = 230; // Represents 2.3
+TUNE(Range(100, 500), LMR_DIVISOR);
 
 // Repetition Detection Data Structures
-uint64_t game_history_hashes[256]; // Stores hashes of positions for repetition checks
+uint64_t game_history_hashes[256]; 
 int game_history_length = 0;
-uint64_t search_path_hashes[MAX_PLY]; // Stores hashes of positions in the current search path
-int search_path_evals[MAX_PLY]; // Stores static evals for dynamic LMR
+uint64_t search_path_hashes[MAX_PLY]; 
+int search_path_evals[MAX_PLY]; 
 
 void reset_search_state() {
     nodes_searched = 0;
@@ -1542,16 +1696,16 @@ void reset_search_heuristics() {
     for (int d = 1; d < MAX_PLY; ++d) {
         for (int m = 1; m < 256; ++m) {
             // Formula: log(depth) * log(moves_searched) / C
-            double reduction = (log(d) * log(m)) / 2.3;
+            // Using tunable LMR_DIVISOR (scaled by 100)
+            double reduction = (log(d) * log(m)) / (LMR_DIVISOR / 100.0);
             
             int r = static_cast<int>(reduction);
 
-            // Basic caps and conditions
             if (d < 3 || m < 2) r = 0;
             if (d > 8 && m > 4) r++;
             
             r = std::max(0, r);
-            r = std::min(r, d - 2); // Ensure at least 1 ply of search remains after reduction
+            r = std::min(r, d - 2); 
             
             search_reductions[d][m] = r;
         }
@@ -1618,7 +1772,7 @@ int see(const Position& pos, const Move& move) {
             }
         }
 
-        if(from_bb == 0) break; // Should not happen if side_attackers is not 0
+        if(from_bb == 0) break; 
 
         attackers ^= from_bb;
         occupied ^= from_bb;
@@ -1795,14 +1949,16 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         // Reverse Futility Pruning (RFP)
         if (depth < 8) {
             bool improving = (ply >= 2 && static_eval > search_path_evals[ply-2]);
-            int rfp_margin = 64 * (depth - improving);
+            // Tuned: RFP_MARGIN_BASE
+            int rfp_margin = RFP_MARGIN_BASE * (depth - improving);
             if (static_eval - rfp_margin >= beta)
                 return static_eval;
         }
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 182 + 78 * depth;
+            // Tuned: RAZORING_BASE, RAZORING_SLOPE
+            int razoring_margin = RAZORING_BASE + RAZORING_SLOPE * depth;
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
@@ -1825,7 +1981,8 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1;
 
             int eval_bonus = std::min(3, (static_eval - beta) / 200);
-            int R_nmp = 3 + depth / 4 + eval_bonus;
+            // Tuned: NMP_BASE, NMP_DEPTH_DIVISOR
+            int R_nmp = NMP_BASE + depth / NMP_DEPTH_DIVISOR + eval_bonus;
             int null_score = -search(null_next_pos, depth - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
@@ -1854,6 +2011,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             if (!is_legal) continue;
 
             // Search with a reduced depth and the raised beta
+            // Tuned: TACTICAL_LOOKAHEAD_REDUCTION
             int tactical_score = -search(next_pos, depth - 1 - TACTICAL_LOOKAHEAD_REDUCTION,
                                           -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move);
 
@@ -1888,19 +2046,18 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
         // Futility Pruning
         if (is_quiet && !in_check && best_score > -MATE_THRESHOLD) {
             if (depth <= 3) {
-                int futility_margins[4] = {0, 125, 275, 450}; // Margins for depth 1, 2, 3
+                // Margins can be tuned as well, but let's stick to array for now or extract later
+                int futility_margins[4] = {0, 125, 275, 450}; 
                 if (static_eval + futility_margins[depth] < alpha)
                     continue; // Prune this quiet move
             }
         }
 
         // --- Static Exchange Evaluation (SEE) Pruning ---
-        // If a move is unlikely to win material, we can prune it at shallow depths.
-        // This is especially effective for moves with low scores from the move picker.
         if ( !is_pv_node && depth <= 9 && best_score > -MATE_THRESHOLD )
         {
-            // Define aggressive margins that become stricter at deeper depths.
-            int see_margin = -75 * depth;
+            // Tuned: SEE_PRUNING_MULTIPLIER
+            int see_margin = -SEE_PRUNING_MULTIPLIER * depth;
 
             // Prune the move if its SEE value is below the margin.
             if (see(pos, current_move) < see_margin) {
@@ -2150,9 +2307,13 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.77\n";
+            std::cout << "id name Amira 1.77 Tunable\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
+            
+            // Print tuning options
+            Tune::instance().print_options();
+
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) {
@@ -2162,19 +2323,23 @@ void uci_loop() {
             std::cout << "readyok\n" << std::flush;
         } else if (token == "setoption") {
             std::string name_token, value_token, name_str, value_str_val;
-            ss >> name_token;
+            ss >> name_token; // "name"
             if (name_token == "name") {
-                ss >> name_str;
-                ss >> value_token;
-                ss >> value_str_val;
+                ss >> name_str; // The option name
+                ss >> value_token; // "value"
+                ss >> value_str_val; // The value
 
                 if (name_str == "Hash") {
                     try {
                         int parsed_size = std::stoi(value_str_val);
                         g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 16384));
-                    } catch (...) { /* ignore parse error, keep default */ }
+                    } catch (...) { }
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
+                } 
+                // Try to set tuning options
+                else {
+                    Tune::instance().set_option(name_str, value_str_val);
                 }
             }
         } else if (token == "ucinewgame") {
@@ -2201,7 +2366,6 @@ void uci_loop() {
                         token = "";
                     }
                 } else token = "";
-
             } else if (token == "fen") {
                 std::string temp_fen_part;
                 while (ss >> temp_fen_part) {
@@ -2214,21 +2378,17 @@ void uci_loop() {
                 if (!fen_str_collector.empty()) fen_str_collector.pop_back();
                 parse_fen(uci_root_pos, fen_str_collector);
             }
-
             if (token == "moves") {
                 std::string move_str_uci;
                 while (ss >> move_str_uci) {
                     Move m = parse_uci_move_from_string(uci_root_pos, move_str_uci);
-                    if (m.is_null() && move_str_uci != "0000") break;
-                    if (m.is_null() && move_str_uci == "0000") break;
-
+                    if (m.is_null()) break;
                     if (game_history_length < 256)
                         game_history_hashes[game_history_length++] = uci_root_pos.zobrist_hash;
                     Piece moved_piece = uci_root_pos.piece_on_sq(m.from);
                     Piece captured_piece = uci_root_pos.piece_on_sq(m.to);
                     if (moved_piece == PAWN || captured_piece != NO_PIECE)
                         game_history_length = 0;
-
                     bool legal;
                     uci_last_root_move = m;
                     uci_root_pos = make_move(uci_root_pos, m, legal);
@@ -2236,7 +2396,7 @@ void uci_loop() {
                 }
             }
         } else if (token == "go") {
-            if (!g_tt_is_initialized) {
+             if (!g_tt_is_initialized) {
                 init_tt(g_configured_tt_size_mb);
                 g_tt_is_initialized = true;
             }
@@ -2261,7 +2421,6 @@ void uci_loop() {
                 continue;
             }
 
-            // --- Time Control Parsing ---
             long long wtime = -1, btime = -1, winc = 0, binc = 0;
             int movestogo = 0;
             int max_depth_to_search = MAX_PLY;
@@ -2285,40 +2444,22 @@ void uci_loop() {
 
             if (my_time != -1) {
                 use_time_limits = true;
-
                 if (my_inc > 0) {
-                    // --- INCREMENT TIME CONTROL ---
                     soft_limit_ms = static_cast<long long>(my_time * 0.053);
                     long long hard_limit_ms = static_cast<long long>(my_time * 0.405);
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(hard_limit_ms);
                 } else {
-                    // --- SUDDEN DEATH TIME CONTROL ---
-                    // This logic aims to use a fraction of the remaining time.
-
-                    // If 'movestogo' is given, we use that to divide our time.
-                    // Otherwise, we estimate we have ~25 moves left in the game (a safe guess).
                     int divisor = (movestogo > 0) ? movestogo : 25;
-
-                    // Calculate the allocated time for this move.
                     long long allocated_time_ms = my_time / divisor;
-                    
-                    // Safety net: never use more than ~80% of the remaining time on a single move,
-                    // especially if movestogo is very low (e.g., 1).
                     allocated_time_ms = std::min(allocated_time_ms, my_time * 8 / 10);
-                    
-                    // Final safety buffer: always leave a small amount of time on the clock.
-                    if (allocated_time_ms >= my_time)
-                        allocated_time_ms = my_time - 100; // Leave 100ms
+                    if (allocated_time_ms >= my_time) allocated_time_ms = my_time - 100;
                     if (allocated_time_ms < 0) allocated_time_ms = 0;
-                    
-                    // For simplicity, we use the same time for both soft and hard limits.
                     soft_limit_ms = allocated_time_ms;
                     soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     hard_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                 }
-            } else
-                use_time_limits = false;
+            } else use_time_limits = false;
 
             uci_best_move_overall = NULL_MOVE;
             int best_score_overall = 0;
@@ -2354,7 +2495,7 @@ void uci_loop() {
                     aspiration_window_delta = 50;
                 }
 
-                Move tt_root_move = NULL_MOVE; int tt_root_score, tt_root_eval; // tt_root_eval is unused here
+                Move tt_root_move = NULL_MOVE; int tt_root_score, tt_root_eval;
                 int dummy_alpha = -INF_SCORE, dummy_beta = INF_SCORE;
                 if (probe_tt(uci_root_pos.zobrist_hash, depth, 0, dummy_alpha, dummy_beta, tt_root_move, tt_root_score, tt_root_eval)) {
                      if (!tt_root_move.is_null()) uci_best_move_overall = tt_root_move;
@@ -2400,14 +2541,11 @@ void uci_loop() {
                 }
                 std::cout << std::endl;
 
-                // --- Time Management Decisions ---
                 if (use_time_limits && depth >= 4) {
-                    // Panic: score dropped significantly, extend time
                     if (depth > 1 && best_score_overall < last_iter_score - 70) {
                         soft_limit_ms = soft_limit_ms * 3 / 2;
                         soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     }
-                    // Confidence: if the best move is stable for a few iterations, we can consider stopping early.
                     if (uci_best_move_overall == last_iter_best_move && elapsed_ms * 2 > soft_limit_ms)
                          break;
                 }
@@ -2449,6 +2587,9 @@ void uci_loop() {
 int main(int argc, char* argv[]) {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(NULL);
+
+    // Initialize the tuning system
+    Tune::instance().init();
 
     init_zobrist();
     init_attack_tables();
