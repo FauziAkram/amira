@@ -719,9 +719,9 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
 // --- Evaluation ---
 const PhaseScore piece_phase_values[6] = {
-    {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
+    {84, 134}, {379, 410}, {389, 430}, {570, 680}, {1121, 1350}, {0, 0}
 };
-const int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
+const int see_piece_values[7] = {99, 326, 335, 510, 925, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
@@ -799,29 +799,29 @@ uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
 const PhaseScore passed_pawn_bonus[8] = {
-    {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
+    {0, 0}, {5, 12}, {15, 29}, {26, 42}, {40, 64}, {60, 95}, {79, 125}, {0, 0}
 };
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
-const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
-const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
+const PhaseScore TEMPO_BONUS                   = {14, 15};
+const PhaseScore BISHOP_PAIR_BONUS             = {26, 75};
+const PhaseScore PROTECTED_PAWN_BONUS          = {7, 14};
+const PhaseScore ISOLATED_PAWN_PENALTY         = {-14, -21};
+const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -19};
+const PhaseScore BACKWARD_PAWN_PENALTY         = {-10, -14};
+const PhaseScore KNIGHT_MOBILITY_BONUS         = {1, 3};
 const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
 const PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
 const PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
+const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 21};
 const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
-const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
-const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
+const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 2};
+const PhaseScore ROOK_ON_OPEN_FILE             = {29, 12};
+const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {12, 9};
 const PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
-const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-const int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
-const int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
+const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 9};
+const int PasserMyKingDistance[8] = {0, -1, 1, 7, 14, 20, 17, 0};
+const int PasserEnemyKingDistance[8] = {0, -3, 1, 9, 24, 38, 37, 0};
 const PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
     {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
@@ -831,17 +831,17 @@ const PhaseScore PasserUnsafeBonus[2][8] = {
     {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
 };
 const PhaseScore THREAT_BY_MINOR[7] = {
-    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
+    {0,0}, {1,10}, {16,12}, {20,15}, {25,32}, {19,39}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
 const PhaseScore THREAT_BY_ROOK[7] = {
-    {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
+    {0,0}, {0,10}, {8,17}, {12,14}, {0,10}, {16,9}, {0,0}
 };
-const PhaseScore THREAT_BY_KING = {6, 21};
-const PhaseScore HANGING_PIECE_BONUS = {18, 10};
-const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
+const PhaseScore THREAT_BY_KING = {6, 22};
+const PhaseScore HANGING_PIECE_BONUS = {18, 11};
+const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 1};
 const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
-const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+const PhaseScore SAFE_PAWN_ATTACK_BONUS = {42, 24};
+const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 8};
 const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
@@ -856,20 +856,20 @@ const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
 // --- Evaluation Constants for King Safety ---
 // King Shelter Penalties (Middlegame only)
 const int SHIELD_PAWN_PRESENT_BONUS = 10;
-const int SHIELD_PAWN_MISSING_PENALTY = -20;
+const int SHIELD_PAWN_MISSING_PENALTY = -19;
 const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
-const int SHIELD_OPEN_FILE_PENALTY = -15;
-const int SafetyKnightWeight    = 32;
-const int SafetyBishopWeight    = 19;
-const int SafetyRookWeight      = 27;
+const int SHIELD_OPEN_FILE_PENALTY = -16;
+const int SafetyKnightWeight    = 31;
+const int SafetyBishopWeight    = 17;
+const int SafetyRookWeight      = 26;
 const int SafetyQueenWeight     = 23;
-const int SafetyAttackValue     = 32;
+const int SafetyAttackValue     = 33;
 const int SafetyWeakSquares     = 39;
-const int SafetySafeQueenCheck  = 66;
-const int SafetySafeRookCheck   = 61;
+const int SafetySafeQueenCheck  = 64;
+const int SafetySafeRookCheck   = 60;
 const int SafetySafeBishopCheck = 50;
-const int SafetySafeKnightCheck = 58;
-const int SafetyAdjustment      = -63;
+const int SafetySafeKnightCheck = 56;
+const int SafetyAdjustment      = -64;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -1384,8 +1384,8 @@ int evaluate(Position& pos) {
                 safety_score += SafetySafeKnightCheck * pop_count(knight_checks);
                 safety_score += SafetyAdjustment;
 
-                current_color_score.mg -= safety_score * safety_score / 716;
-                current_color_score.eg -= safety_score / 19;
+                current_color_score.mg -= safety_score * safety_score / 715;
+                current_color_score.eg -= safety_score / 18;
             }
         }
 
@@ -1542,7 +1542,7 @@ void reset_search_heuristics() {
     for (int d = 1; d < MAX_PLY; ++d) {
         for (int m = 1; m < 256; ++m) {
             // Formula: log(depth) * log(moves_searched) / C
-            double reduction = (log(d) * log(m)) / 2.3;
+            double reduction = (log(d) * log(m)) / 2.31;
             
             int r = static_cast<int>(reduction);
 
@@ -1802,7 +1802,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         // Razoring
         if (depth < 4) {
-            int razoring_margin = 182 + 78 * depth;
+            int razoring_margin = 181 + 78 * depth;
             if (static_eval + razoring_margin < alpha) {
                 int q_score = quiescence_search(pos, alpha, beta, ply);
                 if (q_score < alpha)
@@ -1825,7 +1825,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             null_next_pos.ply = pos.ply + 1;
 
             int eval_bonus = std::min(3, (static_eval - beta) / 200);
-            int R_nmp = 3 + depth / 4 + eval_bonus;
+            int R_nmp = 3 + depth / 3 + eval_bonus;
             int null_score = -search(null_next_pos, depth - R_nmp, -beta, -beta + 1, ply + 1, false, false, NULL_MOVE);
             
             if (stop_search_flag) return 0;
