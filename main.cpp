@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <cstring> // For std::memset
 #include <cstdint>
-#include <random>   // For std::mt19937_64
-#include <cctype>   // For std::isdigit, std::islower, std::tolower
-#include <cmath>    // For std::log
+#include <random>  // For std::mt19937_64
+#include <cctype>  // For std::isdigit, std::islower, std::tolower
+#include <cmath>   // For std::log
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -151,7 +151,7 @@ struct Move {
     bool is_null() const { return from == 0 && to == 0 && promotion == NO_PIECE; }
 };
 
-const Move NULL_MOVE = {0, 0, NO_PIECE, 0};
+constexpr Move NULL_MOVE = {0, 0, NO_PIECE, 0};
 
 std::string move_to_uci(const Move& move) {
     if (move.is_null()) return "0000";
@@ -718,14 +718,14 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 }
 
 // --- Evaluation ---
-const PhaseScore piece_phase_values[6] = {
+constexpr PhaseScore piece_phase_values[6] = {
     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
 };
-const int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
+constexpr int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
 
 // --- PIECE-SQUARE TABLES ---
 
-const PhaseScore pawn_pst[64] = {
+constexpr PhaseScore pawn_pst[64] = {
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0},
     { -3,   9}, { -2,   8}, {  0,   8}, {  1,   0}, {  1,  11}, { -1,   7}, { -2,   8}, { -5,   5},
     { -5,   3}, { -8,   4}, {  2,  -3}, { 13,  -3}, { 17,  -3}, {  8,  -1}, { -3,  -4}, {-12,   0},
@@ -735,7 +735,7 @@ const PhaseScore pawn_pst[64] = {
     { -1, -31}, {-32,  -1}, { -9, -15}, { 71,  -1}, { 48,  -9}, { 31,  -6}, {-12,  11}, { -1, -12},
     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}
 };
-const PhaseScore knight_pst[64] = {
+constexpr PhaseScore knight_pst[64] = {
     {-72, -62}, {-39, -39}, {-35, -32}, {-34, -19}, {-33, -19}, {-36, -31}, {-40, -39}, {-76, -61},
     {-33, -35}, {-18, -14}, { -6, -17}, { -0,   7}, {  0,   7}, { -8, -16}, {-17, -17}, {-36, -26},
     {-28, -28}, {  0,  -6}, {  9,   4}, { 14,  24}, { 14,  24}, {  5,   3}, { -3,  -6}, {-30, -27},
@@ -745,7 +745,7 @@ const PhaseScore knight_pst[64] = {
     {-34, -21}, {-25,  -9}, {  7, -16}, { 14,   6}, { 15,   6}, {  7, -13}, {-26,  -9}, {-36, -21},
     {-109,-59}, {-60, -33}, {-60, -20}, {-32, -12}, {-28, -11}, {-56, -18}, {-67, -29}, {-109, -58}
 };
-const PhaseScore bishop_pst[64] = {
+constexpr PhaseScore bishop_pst[64] = {
     {-20, -24}, { -7, -11}, { -8, -10}, { -7,  -6}, { -7,  -5}, { -9, -10}, { -8, -11}, {-19, -25},
     {  2, -16}, {  3, -24}, {  4,  -4}, {  4,   2}, {  4,   2}, {  5,  -4}, {  6, -24}, {  2, -25},
     { -5,  -7}, {  9,   2}, { -1,   3}, { 12,  12}, { 12,  13}, { -1,   2}, {  9,   3}, { -3,  -6},
@@ -755,7 +755,7 @@ const PhaseScore bishop_pst[64] = {
     {-23,  -3}, {-37,   5}, {-10,   5}, {-26,  11}, {-26,  11}, {-10,   8}, {-51,   5}, {-44,  -2},
     {-38, -14}, {-51,  -8}, {-94,   5}, {-83,   9}, {-85,   8}, {-71,  -0}, {-43,  -7}, {-62, -15}
 };
-const PhaseScore rook_pst[64] = {
+constexpr PhaseScore rook_pst[64] = {
     {-18,  -0}, {-18,   1}, {-12,   1}, { -5,  -3}, { -4,  -3}, { -9,   1}, {-12,  -1}, {-17,  -8},
     {-28,  -3}, {-20,  -9}, {-14,  -6}, { -7,  -9}, { -6, -10}, {-15, -12}, {-18, -14}, {-28,  -1},
     {-19,  -3}, {-13,   7}, {-24,   6}, {-12,   0}, {-10,   1}, {-25,   5}, { -5,   6}, {-19,  -1},
@@ -765,7 +765,7 @@ const PhaseScore rook_pst[64] = {
     { -5,  18}, {-18,  29}, { -1,  27}, { 15,  28}, { 14,  28}, { -1,  27}, {-21,  30}, { -4,  18},
     {  2,  21}, { 15,  34}, { -0,  42}, {  8,  38}, {  9,  38}, {  0,  40}, { 23,  33}, {  4,  22}
 };
-const PhaseScore queen_pst[64] = {
+constexpr PhaseScore queen_pst[64] = {
     { -3, -39}, { -3, -29}, { -2, -27}, {  4, -15}, {  4, -16}, { -1, -31}, { -2, -29}, { -2, -44},
     { -2, -26}, {  4, -17}, {  7, -34}, {  7,  -1}, {  8,  -1}, {  7, -35}, {  4, -26}, { -3, -27},
     { -2, -15}, {  5,  -6}, {  5,   6}, {  1,  17}, {  3,  17}, {  5,   8}, {  6,  -5}, { -2, -16},
@@ -775,7 +775,7 @@ const PhaseScore queen_pst[64] = {
     {-13,  -5}, {-54,  31}, {-16,  14}, {-40,  63}, {-42,  65}, {-15,  14}, {-53,  35}, {-12,   7},
     {  2, -14}, { -3,   0}, { -0,   6}, { -1,   9}, { -3,  13}, {  7,   0}, { -5,   8}, { -2,  -1}
 };
-const PhaseScore king_pst[64] = {
+constexpr PhaseScore king_pst[64] = {
     {136, -52}, {150,   1}, {128,  37}, { 62,  32}, { 62,  32}, {129,  37}, {153,   1}, {137, -53},
     {118,  20}, { 99,  46}, { 72,  79}, { 40,  70}, { 42,  71}, { 70,  79}, {100,  46}, {117,  19},
     { 63,  35}, { 91,  58}, { 77,  87}, { 53, 101}, { 57, 100}, { 76,  88}, { 93,  58}, { 64,  36},
@@ -786,8 +786,8 @@ const PhaseScore king_pst[64] = {
     { 22, -34}, { 50,  -5}, { 11,   2}, { -2,  12}, { -5,  11}, {  2,   2}, { 51,  -6}, {  4, -34},
 };
 
-const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
-const int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
+constexpr const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
+constexpr int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
 
 // Evaluation helper masks
 uint64_t file_bb_mask[8];
@@ -798,51 +798,51 @@ uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
-const PhaseScore passed_pawn_bonus[8] = {
+constexpr PhaseScore passed_pawn_bonus[8] = {
     {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
 };
 
 // --- Evaluation Constants ---
-const PhaseScore TEMPO_BONUS                   = {15, 15};
-const PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
-const PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-const PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
-const PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
-const PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-const PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
-const PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
-const PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
-const PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-const PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
-const PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
-const PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-const PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
-const PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-const PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
-const PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-const int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
-const int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
-const PhaseScore PasserBlockedBonus[2][8] = {
+constexpr PhaseScore TEMPO_BONUS                   = {15, 15};
+constexpr PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
+constexpr PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
+constexpr PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
+constexpr PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
+constexpr PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
+constexpr PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
+constexpr PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
+constexpr PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
+constexpr PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
+constexpr PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
+constexpr PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
+constexpr PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
+constexpr PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
+constexpr PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
+constexpr PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
+constexpr PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
+constexpr int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
+constexpr int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
+constexpr PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
     {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
 };
-const PhaseScore PasserUnsafeBonus[2][8] = {
+constexpr PhaseScore PasserUnsafeBonus[2][8] = {
     {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
     {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
 };
-const PhaseScore THREAT_BY_MINOR[7] = {
+constexpr PhaseScore THREAT_BY_MINOR[7] = {
     {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
-const PhaseScore THREAT_BY_ROOK[7] = {
+constexpr PhaseScore THREAT_BY_ROOK[7] = {
     {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
 };
-const PhaseScore THREAT_BY_KING = {6, 21};
-const PhaseScore HANGING_PIECE_BONUS = {18, 10};
-const PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
-const PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-const PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
-const PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
-const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
+constexpr PhaseScore THREAT_BY_KING = {6, 21};
+constexpr PhaseScore HANGING_PIECE_BONUS = {18, 10};
+constexpr PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
+constexpr PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
+constexpr PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
+constexpr PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+constexpr PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 7, 12}, {20, 20}, {37, 46}, {78, 104}, { 0, 0}},
@@ -855,21 +855,21 @@ const PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
 
 // --- Evaluation Constants for King Safety ---
 // King Shelter Penalties (Middlegame only)
-const int SHIELD_PAWN_PRESENT_BONUS = 10;
-const int SHIELD_PAWN_MISSING_PENALTY = -20;
-const int SHIELD_PAWN_ADVANCED_PENALTY = -12;
-const int SHIELD_OPEN_FILE_PENALTY = -15;
-const int SafetyKnightWeight    = 32;
-const int SafetyBishopWeight    = 19;
-const int SafetyRookWeight      = 27;
-const int SafetyQueenWeight     = 23;
-const int SafetyAttackValue     = 32;
-const int SafetyWeakSquares     = 39;
-const int SafetySafeQueenCheck  = 66;
-const int SafetySafeRookCheck   = 61;
-const int SafetySafeBishopCheck = 50;
-const int SafetySafeKnightCheck = 58;
-const int SafetyAdjustment      = -63;
+constexpr int SHIELD_PAWN_PRESENT_BONUS = 10;
+constexpr int SHIELD_PAWN_MISSING_PENALTY = -20;
+constexpr int SHIELD_PAWN_ADVANCED_PENALTY = -12;
+constexpr int SHIELD_OPEN_FILE_PENALTY = -15;
+constexpr int SafetyKnightWeight    = 32;
+constexpr int SafetyBishopWeight    = 19;
+constexpr int SafetyRookWeight      = 27;
+constexpr int SafetyQueenWeight     = 23;
+constexpr int SafetyAttackValue     = 32;
+constexpr int SafetyWeakSquares     = 39;
+constexpr int SafetySafeQueenCheck  = 66;
+constexpr int SafetySafeRookCheck   = 61;
+constexpr int SafetySafeBishopCheck = 50;
+constexpr int SafetySafeKnightCheck = 58;
+constexpr int SafetyAdjustment      = -63;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -2150,7 +2150,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.78\n";
+            std::cout << "id name Amira 1.79\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
