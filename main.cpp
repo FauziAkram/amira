@@ -1,16 +1,3 @@
-Here is the finalized, optimized, and cleaned-up version of the engine. I have organized the code into logical sections, standardized the naming conventions, removed redundant comments, added constexpr where appropriate, and improved code locality. The logic remains identical to preserve the engine's playing strength, but the structure is now production-ready for a single-file engine.
-
-code
-C++
-download
-content_copy
-expand_less
-/**
- * AMIRA CHESS ENGINE
- * Single-file C++ implementation using Bitboards, Magic Bitboards, 
- * Zobrist Hashing, and PVS Search with Late Move Reductions.
- */
-
 #include <iostream>
 #include <vector>
 #include <string>
@@ -1289,3 +1276,4 @@ int main() {
     uci_loop();
     return 0;
 }
+
