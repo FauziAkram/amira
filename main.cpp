@@ -184,6 +184,7 @@ struct Position {
     int fullmove_number;
     int ply;
     int static_eval; // Store the last evaluation for dynamic LMR
+    PhaseScore pst_score;
 
     Position() : side_to_move(WHITE), ep_square(-1), castling_rights(0),
                  zobrist_hash(0), pawn_zobrist_key(0), halfmove_clock(0),
@@ -419,6 +420,78 @@ inline uint64_t get_queen_attacks(int sq, uint64_t occupied) {
     return get_rook_attacks(sq, occupied) | get_bishop_attacks(sq, occupied);
 }
 
+ // --- Evaluation Constants ---
+ constexpr PhaseScore piece_phase_values[6] = {
+     {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
+ };
+ constexpr int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
+ 
+ // --- PIECE-SQUARE TABLES ---
+ 
+ constexpr PhaseScore pawn_pst[64] = {
+     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0},
+     { -3,   9}, { -2,   8}, {  0,   8}, {  1,   0}, {  1,  11}, { -1,   7}, { -2,   8}, { -5,   5},
+     { -5,   3}, { -8,   4}, {  2,  -3}, { 13,  -3}, { 17,  -3}, {  8,  -1}, { -3,  -4}, {-12,   0},
+     { -2,  11}, {-18,  14}, {  5,  -3}, { 11, -10}, {  9, -17}, {  8,  -5}, { -7,   5}, { -4,   6},
+     { -1,  18}, {-12,  12}, {-12,  -4}, {  4, -22}, { -0, -20}, { -4,  -4}, {-14,  14}, { -1,  20},
+     {  9,  50}, { -3,  48}, {  7,  38}, { 22,  -4}, { 35,  -3}, {  2,  38}, { -1,  50}, { -6,  51},
+     { -1, -31}, {-32,  -1}, { -9, -15}, { 71,  -1}, { 48,  -9}, { 31,  -6}, {-12,  11}, { -1, -12},
+     {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}
+ };
+ constexpr PhaseScore knight_pst[64] = {
+     {-72, -62}, {-39, -39}, {-35, -32}, {-34, -19}, {-33, -19}, {-36, -31}, {-40, -39}, {-76, -61},
+     {-33, -35}, {-18, -14}, { -6, -17}, { -0,   7}, {  0,   7}, { -8, -16}, {-17, -17}, {-36, -26},
+     {-28, -28}, {  0,  -6}, {  9,   4}, { 14,  24}, { 14,  24}, {  5,   3}, { -3,  -6}, {-30, -27},
+     {-22, -17}, {  8,  19}, { 21,  25}, { 26,  39}, { 25,  40}, { 21,  25}, {  9,  17}, {-24, -22},
+     {-23, -21}, { 13,   8}, { 26,  28}, { 26,  44}, { 26,  43}, { 26,  27}, { 13,   8}, {-23, -20},
+     {-36, -24}, {  6,  -6}, { 26,  14}, { 23,  29}, { 26,  28}, { 30,  14}, { 7,   -3}, {-35, -24},
+     {-34, -21}, {-25,  -9}, {  7, -16}, { 14,   6}, { 15,   6}, {  7, -13}, {-26,  -9}, {-36, -21},
+     {-109,-59}, {-60, -33}, {-60, -20}, {-32, -12}, {-28, -11}, {-56, -18}, {-67, -29}, {-109, -58}
+ };
+ constexpr PhaseScore bishop_pst[64] = {
+     {-20, -24}, { -7, -11}, { -8, -10}, { -7,  -6}, { -7,  -5}, { -9, -10}, { -8, -11}, {-19, -25},
+     {  2, -16}, {  3, -24}, {  4,  -4}, {  4,   2}, {  4,   2}, {  5,  -4}, {  6, -24}, {  2, -25},
+     { -5,  -7}, {  9,   2}, { -1,   3}, { 12,  12}, { 12,  13}, { -1,   2}, {  9,   3}, { -3,  -6},
+     { -8,  -5}, {  6,   4}, { 10,  12}, { 16,  20}, { 17,  20}, { 11,  11}, {  8,   4}, { -8,  -4},
+     {-13,  -2}, { 11,   8}, {  8,  10}, { 16,  22}, { 13,  23}, {  7,  10}, { 11,   8}, {-11,  -1},
+     {-11,  -8}, { -7,  11}, { -5,   8}, {  4,  16}, {  9,  15}, { -7,   9}, { -2,  13}, {-10,  -4},
+     {-23,  -3}, {-37,   5}, {-10,   5}, {-26,  11}, {-26,  11}, {-10,   8}, {-51,   5}, {-44,  -2},
+     {-38, -14}, {-51,  -8}, {-94,   5}, {-83,   9}, {-85,   8}, {-71,  -0}, {-43,  -7}, {-62, -15}
+ };
+ constexpr PhaseScore rook_pst[64] = {
+     {-18,  -0}, {-18,   1}, {-12,   1}, { -5,  -3}, { -4,  -3}, { -9,   1}, {-12,  -1}, {-17,  -8},
+     {-28,  -3}, {-20,  -9}, {-14,  -6}, { -7,  -9}, { -6, -10}, {-15, -12}, {-18, -14}, {-28,  -1},
+     {-19,  -3}, {-13,   7}, {-24,   6}, {-12,   0}, {-10,   1}, {-25,   5}, { -5,   6}, {-19,  -1},
+     {-26,   5}, {-16,  27}, {-16,  27}, { -4,  19}, { -6,  20}, {-17,  26}, {-11,  25}, {-25,   5},
+     {-17,  10}, { -2,  20}, { 10,  20}, { 26,  22}, { 25,  23}, {  7,  21}, { 11,  19}, {-14,  10},
+     {-18,  15}, {  3,  20}, {  1,  27}, { 27,  29}, { 26,  29}, {  2,  27}, { 23,  23}, {-16,  15},
+     { -5,  18}, {-18,  29}, { -1,  27}, { 15,  28}, { 14,  28}, { -1,  27}, {-21,  30}, { -4,  18},
+     {  2,  21}, { 15,  34}, { -0,  42}, {  8,  38}, {  9,  38}, {  0,  40}, { 23,  33}, {  4,  22}
+ };
+ constexpr PhaseScore queen_pst[64] = {
+     { -3, -39}, { -3, -29}, { -2, -27}, {  4, -15}, {  4, -16}, { -1, -31}, { -2, -29}, { -2, -44},
+     { -2, -26}, {  4, -17}, {  7, -34}, {  7,  -1}, {  8,  -1}, {  7, -35}, {  4, -26}, { -3, -27},
+     { -2, -15}, {  5,  -6}, {  5,   6}, {  1,  17}, {  3,  17}, {  5,   8}, {  6,  -5}, { -2, -16},
+     {  2,  -5}, {  4,  22}, { -3,  23}, {-13,  58}, {-12,  57}, { -2,  22}, {  7,  23}, {  1,  -2},
+     { -4,  -2}, { -2,   8}, {-12,  26}, {-22,  64}, {-22,  68}, {-18,  30}, { -1,  34}, { -4,  11},
+     {-10,  -1}, {-15,  13}, {-25,  26}, {-18,  48}, {-17,  49}, {-20,  25}, {-12,  24}, {-10,  18},
+     {-13,  -5}, {-54,  31}, {-16,  14}, {-40,  63}, {-42,  65}, {-15,  14}, {-53,  35}, {-12,   7},
+     {  2, -14}, { -3,   0}, { -0,   6}, { -1,   9}, { -3,  13}, {  7,   0}, { -5,   8}, { -2,  -1}
+ };
+ constexpr PhaseScore king_pst[64] = {
+     {136, -52}, {150,   1}, {128,  37}, { 62,  32}, { 62,  32}, {129,  37}, {153,   1}, {137, -53},
+     {118,  20}, { 99,  46}, { 72,  79}, { 40,  70}, { 42,  71}, { 70,  79}, {100,  46}, {117,  19},
+     { 63,  35}, { 91,  58}, { 77,  87}, { 53, 101}, { 57, 100}, { 76,  88}, { 93,  58}, { 64,  36},
+     { 61,  39}, {107,  69}, { 74,  97}, {  8, 104}, { 23, 102}, { 75,  96}, {108,  70}, { 53,  33},
+     { 60,  42}, {105,  70}, { 56, 111}, { 13, 113}, {  4, 113}, { 53, 110}, { 96,  72}, { 52,  42},
+     { 60,  30}, { 91,  97}, { 56, 112}, {  0, 112}, { -1, 113}, { 49, 112}, { 85,  97}, { 53,  28},
+     { 39,  -7}, { 61,  49}, { 33,  50}, {  4,  53}, { -2,  52}, { 35,  50}, { 61,  49}, { 36,  -9},
+     { 22, -34}, { 50,  -5}, { 11,   2}, { -2,  12}, { -5,  11}, {  2,   2}, { 51,  -6}, {  4, -34},
+ };
+ 
+ constexpr const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
+ constexpr int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
+
 // --- is_square_attacked and helpers ---
 bool is_square_attacked(const Position& pos, int sq_to_check, int attacker_c) {
     uint64_t occupied = pos.get_occupied_bb();
@@ -595,6 +668,25 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     if (pos.squares[move.to] != EMPTY_SQUARE && get_piece_color(pos.squares[move.to]) == stm) return pos;
 
     next_pos.zobrist_hash = pos.zobrist_hash;
+    next_pos.pst_score = pos.pst_score;
+
+    // 1. Remove moving piece from source
+    int from_idx = (stm == WHITE) ? move.from : (63 - move.from);
+    PhaseScore moved_val = piece_phase_values[piece_moved] + pst_all[piece_moved][from_idx];
+    if (stm == WHITE) next_pos.pst_score -= moved_val; else next_pos.pst_score += moved_val;
+
+    // 2. Add moving piece to destination (if not promotion, handled below)
+    // We assume it's the same piece for now, if promotion, we correct it later
+    int to_idx = (stm == WHITE) ? move.to : (63 - move.to);
+    PhaseScore to_val = piece_phase_values[piece_moved] + pst_all[piece_moved][to_idx];
+    if (stm == WHITE) next_pos.pst_score += to_val; else next_pos.pst_score -= to_val;
+
+    // 3. Handle standard capture (Remove captured piece)
+    if (piece_captured != NO_PIECE) {
+        int cap_idx = (opp == WHITE) ? move.to : (63 - move.to);
+        PhaseScore cap_val = piece_phase_values[piece_captured] + pst_all[piece_captured][cap_idx];
+        if (opp == WHITE) next_pos.pst_score -= cap_val; else next_pos.pst_score += cap_val;
+    }
     next_pos.pawn_zobrist_key = pos.pawn_zobrist_key;
     next_pos.zobrist_hash ^= zobrist_pieces[stm][piece_moved][move.from];
     next_pos.piece_bb[piece_moved] &= ~from_bb;
@@ -617,6 +709,10 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
 
     if (piece_moved == PAWN && move.to == pos.ep_square && pos.ep_square != -1) {
         int captured_pawn_sq = (stm == WHITE) ? move.to - 8 : move.to + 8;
+        // 4. Handle En Passant Capture (Remove pawn from actual location)
+        int ep_idx = (opp == WHITE) ? captured_pawn_sq : (63 - captured_pawn_sq);
+        PhaseScore ep_val = piece_phase_values[PAWN] + pst_all[PAWN][ep_idx];
+        if (opp == WHITE) next_pos.pst_score -= ep_val; else next_pos.pst_score += ep_val;
         next_pos.squares[captured_pawn_sq] = EMPTY_SQUARE;
         next_pos.piece_bb[PAWN] &= ~set_bit(captured_pawn_sq);
         next_pos.color_bb[opp] &= ~set_bit(captured_pawn_sq);
@@ -634,6 +730,12 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
         if (piece_moved != PAWN) return pos; // Invalid promotion
         int promotion_rank_actual = (stm == WHITE) ? 7 : 0; // Actual rank where pawn lands for promotion
         if (move.to / 8 != promotion_rank_actual) return pos; // Invalid promotion square
+
+        // 5. Handle Promotion (Remove the pawn we added in step 2, add the promoted piece)
+        if (stm == WHITE) next_pos.pst_score -= to_val; else next_pos.pst_score += to_val; // Remove pawn val at 'to'
+        
+        PhaseScore promo_val = piece_phase_values[move.promotion] + pst_all[move.promotion][to_idx];
+        if (stm == WHITE) next_pos.pst_score += promo_val; else next_pos.pst_score -= promo_val; // Add promo val at 'to'
         
         // The moving pawn doesn't get added back to the pawn key.
         next_pos.piece_bb[move.promotion] |= to_bb;
@@ -663,6 +765,13 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
             else if (move.to == E1_SQ - 2) { rook_from_sq = A1_SQ; rook_to_sq = E1_SQ - 1; } // White Queenside
             else if (move.to == E8_SQ + 2) { rook_from_sq = H8_SQ; rook_to_sq = E8_SQ + 1; } // Black Kingside
             else { rook_from_sq = A8_SQ; rook_to_sq = E8_SQ - 1; } // Black Queenside (move.to == E8_SQ - 2)
+
+            // 6. Handle Castling Rook (Remove from old, Add to new)
+            int r_from_idx = (stm == WHITE) ? rook_from_sq : (63 - rook_from_sq);
+            int r_to_idx = (stm == WHITE) ? rook_to_sq : (63 - rook_to_sq);
+            PhaseScore r_val_from = piece_phase_values[ROOK] + pst_all[ROOK][r_from_idx];
+            PhaseScore r_val_to   = piece_phase_values[ROOK] + pst_all[ROOK][r_to_idx];
+            if (stm == WHITE) next_pos.pst_score += (r_val_to - r_val_from); else next_pos.pst_score -= (r_val_to - r_val_from);
 
             next_pos.piece_bb[ROOK] &= ~set_bit(rook_from_sq);
             next_pos.piece_bb[ROOK] |= set_bit(rook_to_sq);
@@ -716,78 +825,6 @@ Position make_move(const Position& pos, const Move& move, bool& legal_move_flag)
     legal_move_flag = true;
     return next_pos;
 }
-
-// --- Evaluation ---
-constexpr PhaseScore piece_phase_values[6] = {
-    {85, 135}, {380, 410}, {390, 430}, {570, 680}, {1120, 1350}, {0, 0}
-};
-constexpr int see_piece_values[7] = {100, 325, 335, 510, 925, 10000, 0};
-
-// --- PIECE-SQUARE TABLES ---
-
-constexpr PhaseScore pawn_pst[64] = {
-    {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0},
-    { -3,   9}, { -2,   8}, {  0,   8}, {  1,   0}, {  1,  11}, { -1,   7}, { -2,   8}, { -5,   5},
-    { -5,   3}, { -8,   4}, {  2,  -3}, { 13,  -3}, { 17,  -3}, {  8,  -1}, { -3,  -4}, {-12,   0},
-    { -2,  11}, {-18,  14}, {  5,  -3}, { 11, -10}, {  9, -17}, {  8,  -5}, { -7,   5}, { -4,   6},
-    { -1,  18}, {-12,  12}, {-12,  -4}, {  4, -22}, { -0, -20}, { -4,  -4}, {-14,  14}, { -1,  20},
-    {  9,  50}, { -3,  48}, {  7,  38}, { 22,  -4}, { 35,  -3}, {  2,  38}, { -1,  50}, { -6,  51},
-    { -1, -31}, {-32,  -1}, { -9, -15}, { 71,  -1}, { 48,  -9}, { 31,  -6}, {-12,  11}, { -1, -12},
-    {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}, {  0,   0}
-};
-constexpr PhaseScore knight_pst[64] = {
-    {-72, -62}, {-39, -39}, {-35, -32}, {-34, -19}, {-33, -19}, {-36, -31}, {-40, -39}, {-76, -61},
-    {-33, -35}, {-18, -14}, { -6, -17}, { -0,   7}, {  0,   7}, { -8, -16}, {-17, -17}, {-36, -26},
-    {-28, -28}, {  0,  -6}, {  9,   4}, { 14,  24}, { 14,  24}, {  5,   3}, { -3,  -6}, {-30, -27},
-    {-22, -17}, {  8,  19}, { 21,  25}, { 26,  39}, { 25,  40}, { 21,  25}, {  9,  17}, {-24, -22},
-    {-23, -21}, { 13,   8}, { 26,  28}, { 26,  44}, { 26,  43}, { 26,  27}, { 13,   8}, {-23, -20},
-    {-36, -24}, {  6,  -6}, { 26,  14}, { 23,  29}, { 26,  28}, { 30,  14}, { 7,   -3}, {-35, -24},
-    {-34, -21}, {-25,  -9}, {  7, -16}, { 14,   6}, { 15,   6}, {  7, -13}, {-26,  -9}, {-36, -21},
-    {-109,-59}, {-60, -33}, {-60, -20}, {-32, -12}, {-28, -11}, {-56, -18}, {-67, -29}, {-109, -58}
-};
-constexpr PhaseScore bishop_pst[64] = {
-    {-20, -24}, { -7, -11}, { -8, -10}, { -7,  -6}, { -7,  -5}, { -9, -10}, { -8, -11}, {-19, -25},
-    {  2, -16}, {  3, -24}, {  4,  -4}, {  4,   2}, {  4,   2}, {  5,  -4}, {  6, -24}, {  2, -25},
-    { -5,  -7}, {  9,   2}, { -1,   3}, { 12,  12}, { 12,  13}, { -1,   2}, {  9,   3}, { -3,  -6},
-    { -8,  -5}, {  6,   4}, { 10,  12}, { 16,  20}, { 17,  20}, { 11,  11}, {  8,   4}, { -8,  -4},
-    {-13,  -2}, { 11,   8}, {  8,  10}, { 16,  22}, { 13,  23}, {  7,  10}, { 11,   8}, {-11,  -1},
-    {-11,  -8}, { -7,  11}, { -5,   8}, {  4,  16}, {  9,  15}, { -7,   9}, { -2,  13}, {-10,  -4},
-    {-23,  -3}, {-37,   5}, {-10,   5}, {-26,  11}, {-26,  11}, {-10,   8}, {-51,   5}, {-44,  -2},
-    {-38, -14}, {-51,  -8}, {-94,   5}, {-83,   9}, {-85,   8}, {-71,  -0}, {-43,  -7}, {-62, -15}
-};
-constexpr PhaseScore rook_pst[64] = {
-    {-18,  -0}, {-18,   1}, {-12,   1}, { -5,  -3}, { -4,  -3}, { -9,   1}, {-12,  -1}, {-17,  -8},
-    {-28,  -3}, {-20,  -9}, {-14,  -6}, { -7,  -9}, { -6, -10}, {-15, -12}, {-18, -14}, {-28,  -1},
-    {-19,  -3}, {-13,   7}, {-24,   6}, {-12,   0}, {-10,   1}, {-25,   5}, { -5,   6}, {-19,  -1},
-    {-26,   5}, {-16,  27}, {-16,  27}, { -4,  19}, { -6,  20}, {-17,  26}, {-11,  25}, {-25,   5},
-    {-17,  10}, { -2,  20}, { 10,  20}, { 26,  22}, { 25,  23}, {  7,  21}, { 11,  19}, {-14,  10},
-    {-18,  15}, {  3,  20}, {  1,  27}, { 27,  29}, { 26,  29}, {  2,  27}, { 23,  23}, {-16,  15},
-    { -5,  18}, {-18,  29}, { -1,  27}, { 15,  28}, { 14,  28}, { -1,  27}, {-21,  30}, { -4,  18},
-    {  2,  21}, { 15,  34}, { -0,  42}, {  8,  38}, {  9,  38}, {  0,  40}, { 23,  33}, {  4,  22}
-};
-constexpr PhaseScore queen_pst[64] = {
-    { -3, -39}, { -3, -29}, { -2, -27}, {  4, -15}, {  4, -16}, { -1, -31}, { -2, -29}, { -2, -44},
-    { -2, -26}, {  4, -17}, {  7, -34}, {  7,  -1}, {  8,  -1}, {  7, -35}, {  4, -26}, { -3, -27},
-    { -2, -15}, {  5,  -6}, {  5,   6}, {  1,  17}, {  3,  17}, {  5,   8}, {  6,  -5}, { -2, -16},
-    {  2,  -5}, {  4,  22}, { -3,  23}, {-13,  58}, {-12,  57}, { -2,  22}, {  7,  23}, {  1,  -2},
-    { -4,  -2}, { -2,   8}, {-12,  26}, {-22,  64}, {-22,  68}, {-18,  30}, { -1,  34}, { -4,  11},
-    {-10,  -1}, {-15,  13}, {-25,  26}, {-18,  48}, {-17,  49}, {-20,  25}, {-12,  24}, {-10,  18},
-    {-13,  -5}, {-54,  31}, {-16,  14}, {-40,  63}, {-42,  65}, {-15,  14}, {-53,  35}, {-12,   7},
-    {  2, -14}, { -3,   0}, { -0,   6}, { -1,   9}, { -3,  13}, {  7,   0}, { -5,   8}, { -2,  -1}
-};
-constexpr PhaseScore king_pst[64] = {
-    {136, -52}, {150,   1}, {128,  37}, { 62,  32}, { 62,  32}, {129,  37}, {153,   1}, {137, -53},
-    {118,  20}, { 99,  46}, { 72,  79}, { 40,  70}, { 42,  71}, { 70,  79}, {100,  46}, {117,  19},
-    { 63,  35}, { 91,  58}, { 77,  87}, { 53, 101}, { 57, 100}, { 76,  88}, { 93,  58}, { 64,  36},
-    { 61,  39}, {107,  69}, { 74,  97}, {  8, 104}, { 23, 102}, { 75,  96}, {108,  70}, { 53,  33},
-    { 60,  42}, {105,  70}, { 56, 111}, { 13, 113}, {  4, 113}, { 53, 110}, { 96,  72}, { 52,  42},
-    { 60,  30}, { 91,  97}, { 56, 112}, {  0, 112}, { -1, 113}, { 49, 112}, { 85,  97}, { 53,  28},
-    { 39,  -7}, { 61,  49}, { 33,  50}, {  4,  53}, { -2,  52}, { 35,  50}, { 61,  49}, { 36,  -9},
-    { 22, -34}, { 50,  -5}, { 11,   2}, { -2,  12}, { -5,  11}, {  2,   2}, { 51,  -6}, {  4, -34},
-};
-
-constexpr const PhaseScore* pst_all[6] = {pawn_pst, knight_pst, bishop_pst, rook_pst, queen_pst, king_pst};
-constexpr int game_phase_inc[6] = {0, 1, 1, 2, 4, 0}; // P,N,B,R,Q,K
 
 // Evaluation helper masks
 uint64_t file_bb_mask[8];
@@ -1118,7 +1155,7 @@ PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint6
 int evaluate(Position& pos) {
     if (is_insufficient_material(pos)) return 0; 
 
-    PhaseScore final_score;
+    PhaseScore final_score = pos.pst_score;
     int game_phase = 0;
     
     // --- Pawn Evaluation (with Caching) ---
@@ -1214,10 +1251,6 @@ int evaluate(Position& pos) {
             while (b) {
                 int sq = lsb_index(b);
                 b &= b - 1;
-                int mirrored_sq = (current_eval_color == WHITE) ? sq : (63 - sq);
-
-                current_color_score += piece_phase_values[p];
-                current_color_score += pst_all[p][mirrored_sq];
 
                  if ((Piece)p == PAWN) {
                      uint64_t current_passed_pawns = (current_eval_color == WHITE) ? white_passed_pawns : black_passed_pawns;
@@ -2094,6 +2127,20 @@ void parse_fen(Position& pos, const std::string& fen_str) {
     // 6. Fullmove number
     if (ss >> part) { try {pos.fullmove_number = std::stoi(part);} catch(...){pos.fullmove_number = 1;} }
     else pos.fullmove_number = 1;
+
+    pos.pst_score = {0, 0};
+    for (int c = 0; c < 2; ++c) {
+        for (int p = PAWN; p <= KING; ++p) {
+            uint64_t b = pos.piece_bb[p] & pos.color_bb[c];
+            while (b) {
+                int sq = lsb_index(b);
+                b &= b - 1;
+                int mirrored = (c == WHITE) ? sq : (63 - sq);
+                PhaseScore val = piece_phase_values[p] + pst_all[p][mirrored];
+                if (c == WHITE) pos.pst_score += val; else pos.pst_score -= val;
+            }
+        }
+    }
 
     pos.ply = 0; // Ply at root is 0
     pos.zobrist_hash = calculate_zobrist_hash(pos);
