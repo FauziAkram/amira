@@ -1041,6 +1041,15 @@ int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) 
     if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) == 0 && pawn_advantage <= 1)
         return 160;
 
+    // Pawn Distribution Scaling
+    // If stronger side pawns are only on one wing, reduce eval.
+    // Files 0-3 (A-D) vs 4-7 (E-H)
+    uint64_t queen_side_mask = 0x0F0F0F0F0F0F0F0FULL; 
+    uint64_t king_side_mask  = 0xF0F0F0F0F0F0F0F0ULL;
+    
+    if (!(stronger_side_pawns & queen_side_mask) || !(stronger_side_pawns & king_side_mask))
+        return std::min(256, (192 + pop_count(stronger_side_pawns) * 20) - 40); 
+
     // Scale based on the number of pawns for the stronger side.
     // Winning with few pawns is harder.
     int num_stronger_pawns = pop_count(stronger_side_pawns);
@@ -2150,7 +2159,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.79\n";
+            std::cout << "id name Amira 1.80\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2459,3 +2468,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
