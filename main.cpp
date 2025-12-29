@@ -1903,6 +1903,17 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             }
         }
 
+        // History Pruning
+        // If a quiet move has a terrible history score, skip it at low depths.
+        if (is_quiet && depth < 4 && best_score > -MATE_THRESHOLD) {
+             bool threat_from = get_bit(threats, current_move.from);
+             bool threat_to   = get_bit(threats, current_move.to);
+             int h_score = history_score[pos.side_to_move][threat_from][threat_to][current_move.from][current_move.to];
+             
+             if (h_score < -1024 * depth)
+                 continue;
+        }
+
         // --- Static Exchange Evaluation (SEE) Pruning ---
         // If a move is unlikely to win material, we can prune it at shallow depths.
         // This is especially effective for moves with low scores from the move picker.
@@ -2159,7 +2170,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.80\n";
+            std::cout << "id name Amira 1.81\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2468,4 +2479,3 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
-
