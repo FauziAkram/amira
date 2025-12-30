@@ -1429,11 +1429,13 @@ struct TTEntry {
     int depth = 0;
     int static_eval = 0;
     TTBound bound = TT_NONE;
+    uint8_t gen = 0;
 };
 
 std::vector<TTEntry> transposition_table;
 uint64_t tt_mask = 0;
 bool g_tt_is_initialized = false;
+uint8_t g_tt_generation = 0;
 int g_configured_tt_size_mb = TT_SIZE_MB_DEFAULT;
 
 void init_tt(size_t mb_size) {
@@ -1463,9 +1465,13 @@ void init_tt(size_t mb_size) {
 }
 
 void clear_tt() {
+    g_tt_generation = 0;
     if (!transposition_table.empty())
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
 }
+
+inline void tt_new_search() { g_tt_generation++; }
+inline uint8_t tt_relative_age(uint8_t entry_gen) { return (uint8_t)(g_tt_generation - entry_gen); }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt, int& eval_from_tt) {
     if (tt_mask == 0 || !g_tt_is_initialized) return false;
@@ -1495,10 +1501,11 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
     if (score > MATE_THRESHOLD) score += ply;
     else if (score < -MATE_THRESHOLD) score -= ply;
 
-    bool should_replace = (entry.hash == 0) || (entry.hash != hash) ||
-                          (depth > entry.depth) ||
-                          (depth == entry.depth && bound == TT_EXACT && entry.bound != TT_EXACT) ||
-                          (depth == entry.depth && entry.bound == TT_NONE);
+    uint8_t entry_age = tt_relative_age(entry.gen);
+
+    bool should_replace = (entry.hash != hash)       // Always replace on collision
+                          || (depth >= entry.depth)  // Replace if new depth is better or equal
+                          || (entry_age > 0);        // Replace if the entry is from an old search
 
     if (should_replace) {
         entry.hash = hash;
@@ -1506,6 +1513,7 @@ void store_tt(uint64_t hash, int depth, int ply, int score, TTBound bound, const
         entry.score = score;
         entry.bound = bound;
         entry.static_eval = static_eval;
+        entry.gen = g_tt_generation;
         if (!best_move.is_null() || entry.hash != hash || bound == TT_EXACT || bound == TT_LOWER)
              entry.best_move = best_move;
     }
@@ -2170,7 +2178,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.81\n";
+            std::cout << "id name Amira 1.82\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2261,6 +2269,7 @@ void uci_loop() {
                 g_tt_is_initialized = true;
             }
 
+            tt_new_search();
             Move root_pseudo_moves[256];
             int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
