@@ -1470,13 +1470,8 @@ void clear_tt() {
         std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
 }
 
-inline void tt_new_search() {
-    g_tt_generation++;
-}
-
-inline uint8_t tt_relative_age(uint8_t entry_gen) {
-    return (uint8_t)(g_tt_generation - entry_gen);
-}
+inline void tt_new_search() { g_tt_generation++; }
+inline uint8_t tt_relative_age(uint8_t entry_gen) { return (uint8_t)(g_tt_generation - entry_gen); }
 
 bool probe_tt(uint64_t hash, int depth, int ply, int& alpha, int& beta, Move& move_from_tt, int& score_from_tt, int& eval_from_tt) {
     if (tt_mask == 0 || !g_tt_is_initialized) return false;
@@ -1831,13 +1826,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
                     return alpha;
             }
         }
-    }
-
-    // Internal Iterative Reduction (IIR)
-    // If this is a PV node but we have no TT move to order first, reduce depth.
-    // This encourages a quicker shallow search to populate the TT.
-    if (is_pv_node && depth >= 3 && tt_move.is_null()) {
-        depth--;
     }
 
     // Null Move Pruning (NMP)
@@ -2282,7 +2270,6 @@ void uci_loop() {
             }
 
             tt_new_search();
-
             Move root_pseudo_moves[256];
             int num_pseudo_moves = generate_moves(uci_root_pos, root_pseudo_moves, false);
             std::vector<Move> root_legal_moves;
@@ -2501,3 +2488,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
