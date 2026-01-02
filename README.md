@@ -29,26 +29,27 @@ The original episode where Amira was created is part of the "Coding a Chess Engi
 *   **Principal Variation Search (PVS):** A powerful alpha-beta pruning variant.
 *   **Quiescence Search:** To ensure tactical stability and avoid the horizon effect.
 *   **Transposition Table (TT):** Caches search results to avoid re-calculating known positions.
+*   *   **Search Extensions:**
+    *   **Check Extensions:** Extends the search depth when the king is in check to ensure tactical safety.
 *   **Advanced Pruning Techniques:**
     *   Null Move Pruning (NMP)
     *   Late Move Reductions (LMR) with adaptive, table-driven reduction amounts.
     *   Reverse Futility Pruning (RFP)
     *   Razoring
     *   Tactical Lookahead Pruning
-    *   Check Extensions
 *   **Advanced Move Ordering:**
     *   TT Move (PV Move)
     *   Static Exchange Evaluation (SEE) based capture ordering.
     *   Killer Moves (two per ply).
     *   Counter-Move Heuristic.
-    *   History Heuristic for quiet moves.
+    *   **Threat-Informed History Heuristic:** Quiet move ordering adjusted by the presence of tactical threats.
 
 ### Evaluation Function
 The evaluation is tapered, blending middlegame (MG) and endgame (EG) scores based on the game phase. It includes a rich set of features:
 *   **Material & Piece-Square Tables:** Separate PSTs for MG and EG, especially for the king.
 *   **Pawn Structure (with Caching):**
     *   Isolated, Doubled, Connected, and Backward pawns.
-    *   **Passed Pawns:** With bonuses increasing by rank and based on the distance to the enemy king.
+    *   **Passed Pawns:** Sophisticated scoring based on rank, blocking pieces, and proximity to both the friendly and enemy kings.
 *   **Piece-Specific Features:**
     *   Bishop Pair Bonus.
     *   Rooks on **open and semi-open files**.
