@@ -9,6 +9,7 @@
 #include <random>  // For std::mt19937_64
 #include <cctype>  // For std::isdigit, std::islower, std::tolower
 #include <cmath>   // For std::log
+#include "spsa.h"
 
 // Bit manipulation builtins (MSVC/GCC specific)
 #if defined(_MSC_VER)
@@ -798,50 +799,203 @@ uint64_t adjacent_files_mask[8];
 uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
-constexpr PhaseScore passed_pawn_bonus[8] = {
-    {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
-};
+TUNE_INT(PP_Rank1_MG, 5, 0, 40); TUNE_INT(PP_Rank1_EG, 12, 0, 60);
+TUNE_INT(PP_Rank2_MG, 15, 0, 60); TUNE_INT(PP_Rank2_EG, 28, 0, 80);
+TUNE_INT(PP_Rank3_MG, 25, 0, 80); TUNE_INT(PP_Rank3_EG, 42, 0, 100);
+TUNE_INT(PP_Rank4_MG, 40, 0, 100); TUNE_INT(PP_Rank4_EG, 65, 0, 150);
+TUNE_INT(PP_Rank5_MG, 60, 0, 150); TUNE_INT(PP_Rank5_EG, 95, 0, 200);
+TUNE_INT(PP_Rank6_MG, 80, 0, 200); TUNE_INT(PP_Rank6_EG, 125, 0, 300);
+
+inline PhaseScore get_passed_pawn_bonus(int rank) {
+    if (rank == 1) return {PP_Rank1_MG, PP_Rank1_EG};
+    if (rank == 2) return {PP_Rank2_MG, PP_Rank2_EG};
+    if (rank == 3) return {PP_Rank3_MG, PP_Rank3_EG};
+    if (rank == 4) return {PP_Rank4_MG, PP_Rank4_EG};
+    if (rank == 5) return {PP_Rank5_MG, PP_Rank5_EG};
+    if (rank == 6) return {PP_Rank6_MG, PP_Rank6_EG};
+    return {0, 0};
+}
 
 // --- Evaluation Constants ---
-constexpr PhaseScore TEMPO_BONUS                   = {15, 15};
-constexpr PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
-constexpr PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
-constexpr PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
-constexpr PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
-constexpr PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
-constexpr PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
-constexpr PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
-constexpr PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
-constexpr PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-constexpr PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
-constexpr PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
-constexpr PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-constexpr PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
-constexpr PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
-constexpr PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
-constexpr PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
-constexpr int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
-constexpr int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
-constexpr PhaseScore PasserBlockedBonus[2][8] = {
-    {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
-    {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
-};
-constexpr PhaseScore PasserUnsafeBonus[2][8] = {
-    {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
-    {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
-};
-constexpr PhaseScore THREAT_BY_MINOR[7] = {
-    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
-};
-constexpr PhaseScore THREAT_BY_ROOK[7] = {
-    {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
-};
-constexpr PhaseScore THREAT_BY_KING = {6, 21};
-constexpr PhaseScore HANGING_PIECE_BONUS = {18, 10};
-constexpr PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
-constexpr PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-constexpr PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
-constexpr PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+TUNE_INT(TempoMG, 15, 0, 50);
+TUNE_INT(TempoEG, 15, 0, 50);
+#define TEMPO_BONUS PhaseScore{TempoMG, TempoEG}
+
+TUNE_INT(BishopPairMG, 27, 0, 100);
+TUNE_INT(BishopPairEG, 75, 0, 150);
+#define BISHOP_PAIR_BONUS PhaseScore{BishopPairMG, BishopPairEG}
+
+TUNE_INT(ProtectedPawnMG, 8, 0, 30);
+TUNE_INT(ProtectedPawnEG, 13, 0, 40);
+#define PROTECTED_PAWN_BONUS PhaseScore{ProtectedPawnMG, ProtectedPawnEG}
+
+TUNE_INT(IsolatedPawnMG, -13, -50, 0);
+TUNE_INT(IsolatedPawnEG, -21, -60, 0);
+#define ISOLATED_PAWN_PENALTY PhaseScore{IsolatedPawnMG, IsolatedPawnEG}
+
+TUNE_INT(DoubledPawnMG, -11, -40, 0);
+TUNE_INT(DoubledPawnEG, -18, -50, 0);
+#define DOUBLED_PAWN_PENALTY PhaseScore{DoubledPawnMG, DoubledPawnEG}
+
+TUNE_INT(BackwardPawnMG, -9, -40, 0);
+TUNE_INT(BackwardPawnEG, -14, -50, 0);
+#define BACKWARD_PAWN_PENALTY PhaseScore{BackwardPawnMG, BackwardPawnEG}
+
+TUNE_INT(KnightMobilityMG, 2, 0, 20);
+TUNE_INT(KnightMobilityEG, 3, 0, 20);
+#define KNIGHT_MOBILITY_BONUS PhaseScore{KnightMobilityMG, KnightMobilityEG}
+
+TUNE_INT(BishopMobilityMG, 3, 0, 20);
+TUNE_INT(BishopMobilityEG, 4, 0, 20);
+#define BISHOP_MOBILITY_BONUS PhaseScore{BishopMobilityMG, BishopMobilityEG}
+
+TUNE_INT(RookMobilityMG, 3, 0, 20);
+TUNE_INT(RookMobilityEG, 5, 0, 20);
+#define ROOK_MOBILITY_BONUS PhaseScore{RookMobilityMG, RookMobilityEG}
+
+TUNE_INT(QueenMobilityMG, 2, 0, 20);
+TUNE_INT(QueenMobilityEG, 3, 0, 20);
+#define QUEEN_MOBILITY_BONUS PhaseScore{QueenMobilityMG, QueenMobilityEG}
+TUNE_INT(KnightOutpostMG, 30, 0, 100);
+TUNE_INT(KnightOutpostEG, 20, 0, 100);
+#define KNIGHT_OUTPOST_BONUS PhaseScore{KnightOutpostMG, KnightOutpostEG}
+
+TUNE_INT(BishopOutpostMG, 25, 0, 100);
+TUNE_INT(BishopOutpostEG, 18, 0, 100);
+#define BISHOP_OUTPOST_BONUS PhaseScore{BishopOutpostMG, BishopOutpostEG}
+
+TUNE_INT(PotentialDominanceMG, 6, 0, 50);
+TUNE_INT(PotentialDominanceEG, 4, 0, 50);
+#define POTENTIAL_DOMINANCE_BONUS PhaseScore{PotentialDominanceMG, PotentialDominanceEG}
+
+TUNE_INT(RookOpenFileMG, 28, 0, 80);
+TUNE_INT(RookOpenFileEG, 12, 0, 80);
+#define ROOK_ON_OPEN_FILE PhaseScore{RookOpenFileMG, RookOpenFileEG}
+
+TUNE_INT(RookSemiOpenFileMG, 11, 0, 60);
+TUNE_INT(RookSemiOpenFileEG, 8, 0, 60);
+#define ROOK_ON_SEMI_OPEN_FILE PhaseScore{RookSemiOpenFileMG, RookSemiOpenFileEG}
+
+TUNE_INT(RookEnemyTerritoryMG, 20, 0, 100);
+TUNE_INT(RookEnemyTerritoryEG, 28, 0, 100);
+#define RookOnEnemyTerritoryBonus PhaseScore{RookEnemyTerritoryMG, RookEnemyTerritoryEG}
+
+TUNE_INT(ConnectedRooksTerritoryMG, 5, 0, 50);
+TUNE_INT(ConnectedRooksTerritoryEG, 8, 0, 50);
+#define ConnectedRooksOnTerritoryBonus PhaseScore{ConnectedRooksTerritoryMG, ConnectedRooksTerritoryEG}
+// Tunables for Passed Pawn distance to My King
+TUNE_INT(PMK_Rank1, -2, -10, 10); TUNE_INT(PMK_Rank2, 2, -10, 15); TUNE_INT(PMK_Rank3, 6, 0, 20);
+TUNE_INT(PMK_Rank4, 13, 0, 30);  TUNE_INT(PMK_Rank5, 20, 5, 40); TUNE_INT(PMK_Rank6, 17, 5, 40);
+
+inline int get_passer_my_king_dist(int rank) {
+    if (rank == 1) return PMK_Rank1; if (rank == 2) return PMK_Rank2;
+    if (rank == 3) return PMK_Rank3; if (rank == 4) return PMK_Rank4;
+    if (rank == 5) return PMK_Rank5; if (rank == 6) return PMK_Rank6;
+    return 0;
+}
+
+// Tunables for Passed Pawn distance to Enemy King
+TUNE_INT(PEK_Rank1, -2, -10, 10); TUNE_INT(PEK_Rank2, 0, -10, 15); TUNE_INT(PEK_Rank3, 9, 0, 20);
+TUNE_INT(PEK_Rank4, 24, 5, 40);  TUNE_INT(PEK_Rank5, 38, 10, 60); TUNE_INT(PEK_Rank6, 37, 10, 60);
+
+inline int get_passer_enemy_king_dist(int rank) {
+    if (rank == 1) return PEK_Rank1; if (rank == 2) return PEK_Rank2;
+    if (rank == 3) return PEK_Rank3; if (rank == 4) return PEK_Rank4;
+    if (rank == 5) return PEK_Rank5; if (rank == 6) return PEK_Rank6;
+    return 0;
+}
+// Tunables for Blocked Passed Pawns (Rank 4, 5, 6)
+TUNE_INT(Blocked_R4_MG, 2, -20, 20);   TUNE_INT(Blocked_R4_EG, -11, -40, 20);
+TUNE_INT(Blocked_R5_MG, -8, -40, 20);  TUNE_INT(Blocked_R5_EG, -57, -100, 0);
+TUNE_INT(Blocked_R6_MG, 56, 0, 100);   TUNE_INT(Blocked_R6_EG, -39, -100, 50);
+
+inline PhaseScore get_passer_blocked_bonus(bool blocked, int rank) {
+    if (!blocked) {
+        if (rank == 4) return {6, 18};
+        if (rank == 5) return {-4, 26};
+        if (rank == 6) return {72, 82};
+    } else {
+        if (rank == 4) return {Blocked_R4_MG, Blocked_R4_EG};
+        if (rank == 5) return {Blocked_R5_MG, Blocked_R5_EG};
+        if (rank == 6) return {Blocked_R6_MG, Blocked_R6_EG};
+    }
+    return {0, 0};
+}
+
+// Tunables for Unsafe Passed Pawns (Rank 4, 5, 6)
+TUNE_INT(Unsafe_R4_MG, 6, -30, 30);    TUNE_INT(Unsafe_R4_EG, -6, -40, 20);
+TUNE_INT(Unsafe_R5_MG, 58, 0, 100);    TUNE_INT(Unsafe_R5_EG, -36, -100, 20);
+TUNE_INT(Unsafe_R6_MG, 73, 0, 150);    TUNE_INT(Unsafe_R6_EG, -52, -150, 0);
+
+inline PhaseScore get_passer_unsafe_bonus(bool unsafe, int rank) {
+    if (!unsafe) {
+        if (rank == 4) return {-12, 33};
+        if (rank == 5) return {46, 50};
+        if (rank == 6) return {110, 22};
+    } else {
+        if (rank == 4) return {Unsafe_R4_MG, Unsafe_R4_EG};
+        if (rank == 5) return {Unsafe_R5_MG, Unsafe_R5_EG};
+        if (rank == 6) return {Unsafe_R6_MG, Unsafe_R6_EG};
+    }
+    return {0, 0};
+}// Tunables for Minor Piece Threats
+TUNE_INT(MinorThreatPawnMG, 1, 0, 20);   TUNE_INT(MinorThreatPawnEG, 9, 0, 30);
+TUNE_INT(MinorThreatKnightMG, 16, 0, 40); TUNE_INT(MinorThreatKnightEG, 12, 0, 40);
+TUNE_INT(MinorThreatBishopMG, 20, 0, 50); TUNE_INT(MinorThreatBishopEG, 14, 0, 50);
+TUNE_INT(MinorThreatRookMG, 25, 0, 60);   TUNE_INT(MinorThreatRookEG, 32, 0, 80);
+TUNE_INT(MinorThreatQueenMG, 20, 0, 80);  TUNE_INT(MinorThreatQueenEG, 40, 0, 100);
+
+inline PhaseScore get_threat_by_minor(Piece p) {
+    switch(p) {
+        case PAWN:   return {MinorThreatPawnMG, MinorThreatPawnEG};
+        case KNIGHT: return {MinorThreatKnightMG, MinorThreatKnightEG};
+        case BISHOP: return {MinorThreatBishopMG, MinorThreatBishopEG};
+        case ROOK:   return {MinorThreatRookMG, MinorThreatRookEG};
+        case QUEEN:  return {MinorThreatQueenMG, MinorThreatQueenEG};
+        default:     return {0, 0};
+    }
+}
+
+// Tunables for Rook Threats
+TUNE_INT(RookThreatKnightMG, 0, 0, 20);   TUNE_INT(RookThreatKnightEG, 11, 0, 30);
+TUNE_INT(RookThreatBishopMG, 9, 0, 30);   TUNE_INT(RookThreatBishopEG, 17, 0, 40);
+TUNE_INT(RookThreatRookMG, 11, 0, 30);   TUNE_INT(RookThreatRookEG, 14, 0, 40);
+TUNE_INT(RookThreatQueenMG, 0, 0, 30);    TUNE_INT(RookThreatQueenEG, 9, 0, 40);
+TUNE_INT(RookThreatKingMG, 15, 0, 40);   TUNE_INT(RookThreatKingEG, 9, 0, 40);
+
+inline PhaseScore get_threat_by_rook(Piece p) {
+    switch(p) {
+        case KNIGHT: return {RookThreatKnightMG, RookThreatKnightEG};
+        case BISHOP: return {RookThreatBishopMG, RookThreatBishopEG};
+        case ROOK:   return {RookThreatRookMG, RookThreatRookEG};
+        case QUEEN:  return {RookThreatQueenMG, RookThreatQueenEG};
+        case KING:   return {RookThreatKingMG, RookThreatKingEG};
+        default:     return {0, 0};
+    }
+}
+TUNE_INT(ThreatByKingMG, 6, 0, 40);
+TUNE_INT(ThreatByKingEG, 21, 0, 60);
+#define THREAT_BY_KING PhaseScore{ThreatByKingMG, ThreatByKingEG}
+
+TUNE_INT(HangingPieceMG, 18, 0, 60);
+TUNE_INT(HangingPieceEG, 10, 0, 60);
+#define HANGING_PIECE_BONUS PhaseScore{HangingPieceMG, HangingPieceEG}
+
+TUNE_INT(WeakQueenDefMG, 3, 0, 30);
+TUNE_INT(WeakQueenDefEG, 0, 0, 30);
+#define WEAK_QUEEN_DEFENSE_BONUS PhaseScore{WeakQueenDefMG, WeakQueenDefEG}
+
+TUNE_INT(RestrictedPieceMG, 1, 0, 20);
+TUNE_INT(RestrictedPieceEG, 1, 0, 20);
+#define RESTRICTED_PIECE_BONUS PhaseScore{RestrictedPieceMG, RestrictedPieceEG}
+
+TUNE_INT(SafePawnAttackMG, 41, 0, 100);
+TUNE_INT(SafePawnAttackEG, 24, 0, 100);
+#define SAFE_PAWN_ATTACK_BONUS PhaseScore{SafePawnAttackMG, SafePawnAttackEG}
+
+TUNE_INT(PawnPushThreatMG, 12, 0, 60);
+TUNE_INT(PawnPushThreatEG, 9, 0, 60);
+#define PAWN_PUSH_THREAT_BONUS PhaseScore{PawnPushThreatMG, PawnPushThreatEG}
 constexpr PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
@@ -859,17 +1013,17 @@ constexpr int SHIELD_PAWN_PRESENT_BONUS = 10;
 constexpr int SHIELD_PAWN_MISSING_PENALTY = -20;
 constexpr int SHIELD_PAWN_ADVANCED_PENALTY = -12;
 constexpr int SHIELD_OPEN_FILE_PENALTY = -15;
-constexpr int SafetyKnightWeight    = 32;
-constexpr int SafetyBishopWeight    = 19;
-constexpr int SafetyRookWeight      = 27;
-constexpr int SafetyQueenWeight     = 23;
-constexpr int SafetyAttackValue     = 32;
-constexpr int SafetyWeakSquares     = 39;
-constexpr int SafetySafeQueenCheck  = 66;
-constexpr int SafetySafeRookCheck   = 61;
-constexpr int SafetySafeBishopCheck = 50;
-constexpr int SafetySafeKnightCheck = 58;
-constexpr int SafetyAdjustment      = -63;
+TUNE_INT(SafetyKnightWeight, 32, 0, 100);
+TUNE_INT(SafetyBishopWeight, 19, 0, 100);
+TUNE_INT(SafetyRookWeight, 27, 0, 100);
+TUNE_INT(SafetyQueenWeight, 23, 0, 100);
+TUNE_INT(SafetyAttackValue, 32, 0, 100);
+TUNE_INT(SafetyWeakSquares, 39, 0, 100);
+TUNE_INT(SafetySafeQueenCheck, 66, 0, 200);
+TUNE_INT(SafetySafeRookCheck, 61, 0, 200);
+TUNE_INT(SafetySafeBishopCheck, 50, 0, 200);
+TUNE_INT(SafetySafeKnightCheck, 58, 0, 200);
+TUNE_INT(SafetyAdjustment, -63, -200, 0);
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -998,7 +1152,7 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
         if (is_passed) {
             passed_pawns |= set_bit(sq);
             int rank_from_own_side = (current_eval_color == WHITE) ? (sq / 8) : (7 - (sq / 8));
-            pawn_score += passed_pawn_bonus[rank_from_own_side];
+            pawn_score += get_passed_pawn_bonus(rank_from_own_side);
         }
     }
 }
@@ -1075,7 +1229,7 @@ PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint6
     while(b) {
         int sq = lsb_index(b);
         b &= b - 1;
-        score += THREAT_BY_MINOR[pos.piece_on_sq(sq)];
+        score += get_threat_by_minor(pos.piece_on_sq(sq));
     }
 
     // Threats by rooks (on weak pieces only)
@@ -1083,7 +1237,7 @@ PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint6
     while(b) {
         int sq = lsb_index(b);
         b &= b - 1;
-        score += THREAT_BY_ROOK[pos.piece_on_sq(sq)];
+        score += get_threat_by_rook(pos.piece_on_sq(sq));
     }
 
     // Threats by the king
@@ -1238,15 +1392,15 @@ int evaluate(Position& pos) {
                             int my_king_file = file_of(king_sq);
                             int enemy_king_file = file_of(enemy_king_sq);
 
-                            current_color_score.eg -= PasserMyKingDistance[rank] * std::max(std::abs(rank_of(sq) - rank_of(king_sq)), std::abs(pawn_file - my_king_file));
-                            current_color_score.eg += PasserEnemyKingDistance[rank] * std::max(std::abs(rank_of(sq) - rank_of(enemy_king_sq)), std::abs(pawn_file - enemy_king_file));
+                            current_color_score.eg -= get_passer_my_king_dist(rank) * std::max(std::abs(rank_of(sq) - rank_of(king_sq)), std::abs(pawn_file - my_king_file));
+current_color_score.eg += get_passer_enemy_king_dist(rank) * std::max(std::abs(rank_of(sq) - rank_of(enemy_king_sq)), std::abs(pawn_file - enemy_king_file));
                          }
 
                          bool is_blocked = get_bit(occupied, (current_eval_color == WHITE) ? sq + 8 : sq - 8);
                          bool is_unsafe = get_bit(attackedBy[enemy_color][6], (current_eval_color == WHITE) ? sq + 8 : sq - 8);
 
-                         current_color_score += PasserBlockedBonus[is_blocked][rank];
-                         current_color_score += PasserUnsafeBonus[is_unsafe][rank];
+                         current_color_score += get_passer_blocked_bonus(is_blocked, rank);
+                         current_color_score += get_passer_unsafe_bonus(is_unsafe, rank);
                      }
                  } else if ((Piece)p != KING) { // Mobility for non-king pieces
                     uint64_t mobility_attacks = 0;
@@ -2181,6 +2335,7 @@ void uci_loop() {
             std::cout << "id name Amira 1.82\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
+            SPSA::printUCI();
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
             if (!g_tt_is_initialized) {
@@ -2196,13 +2351,16 @@ void uci_loop() {
                 ss >> value_token;
                 ss >> value_str_val;
 
-                if (name_str == "Hash") {
+if (name_str == "Hash") {
                     try {
                         int parsed_size = std::stoi(value_str_val);
                         g_configured_tt_size_mb = std::max(0, std::min(parsed_size, 16384));
                     } catch (...) { /* ignore parse error, keep default */ }
                     init_tt(g_configured_tt_size_mb);
                     g_tt_is_initialized = true;
+                } else {
+                    // Try to set the parameter as an SPSA value
+                    SPSA::trySetParam(name_str, value_str_val);
                 }
             }
         } else if (token == "ucinewgame") {
