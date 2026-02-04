@@ -799,24 +799,24 @@ uint64_t pawn_attack_shield_mask[2][64]; // [color][square]
 constexpr uint64_t LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
 
 constexpr PhaseScore passed_pawn_bonus[8] = {
-    {0, 0}, {5, 12}, {15, 28}, {25, 42}, {40, 65}, {60, 95}, {80, 125}, {0, 0}
+    {0, 0}, {5, 12}, {16, 29}, {24, 43}, {40, 65}, {59, 95}, {81, 123}, {0, 0}
 };
 
 // --- Evaluation Constants ---
 constexpr PhaseScore TEMPO_BONUS                   = {15, 15};
-constexpr PhaseScore BISHOP_PAIR_BONUS             = {27, 75};
+constexpr PhaseScore BISHOP_PAIR_BONUS             = {26, 75};
 constexpr PhaseScore PROTECTED_PAWN_BONUS          = {8, 13};
 constexpr PhaseScore ISOLATED_PAWN_PENALTY         = {-13, -21};
 constexpr PhaseScore DOUBLED_PAWN_PENALTY          = {-11, -18};
-constexpr PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -14};
+constexpr PhaseScore BACKWARD_PAWN_PENALTY         = {-9, -13};
 constexpr PhaseScore KNIGHT_MOBILITY_BONUS         = {2, 3};
 constexpr PhaseScore BISHOP_MOBILITY_BONUS         = {3, 4};
 constexpr PhaseScore ROOK_MOBILITY_BONUS           = {3, 5};
 constexpr PhaseScore QUEEN_MOBILITY_BONUS          = {2, 3};
-constexpr PhaseScore KNIGHT_OUTPOST_BONUS          = {30, 20};
-constexpr PhaseScore BISHOP_OUTPOST_BONUS          = {25, 18};
+constexpr PhaseScore KNIGHT_OUTPOST_BONUS          = {31, 20};
+constexpr PhaseScore BISHOP_OUTPOST_BONUS          = {26, 18};
 constexpr PhaseScore POTENTIAL_DOMINANCE_BONUS     = {6, 4};
-constexpr PhaseScore ROOK_ON_OPEN_FILE             = {28, 12};
+constexpr PhaseScore ROOK_ON_OPEN_FILE             = {29, 12};
 constexpr PhaseScore ROOK_ON_SEMI_OPEN_FILE        = {11, 8};
 constexpr PhaseScore RookOnEnemyTerritoryBonus     = {20, 28};
 constexpr PhaseScore ConnectedRooksOnTerritoryBonus  = {5, 8};
@@ -824,24 +824,24 @@ constexpr int PasserMyKingDistance[8] = {0, -2, 2, 6, 13, 20, 17, 0};
 constexpr int PasserEnemyKingDistance[8] = {0, -2, 0, 9, 24, 38, 37, 0};
 constexpr PhaseScore PasserBlockedBonus[2][8] = {
     {{0, 0}, {-6, 8}, {-14, -1}, {1, 10}, {6, 18}, {-4, 26}, {72, 82}, {0, 0}},
-    {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -39}, {0, 0}}
+    {{0, 0}, {-5, -6}, {-24, -2}, {-3, -6}, {2, -11}, {-8, -57}, {56, -38}, {0, 0}}
 };
 constexpr PhaseScore PasserUnsafeBonus[2][8] = {
     {{0, 0}, {10, 5}, {5, 14}, {-5, 17}, {-12, 33}, {46, 50}, {110, 22}, {0, 0}},
-    {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -36}, {73, -52}, {0, 0}}
+    {{0, 0}, {3, 3}, {2, 10}, {-1, 0}, {6, -6}, {58, -37}, {75, -53}, {0, 0}}
 };
 constexpr PhaseScore THREAT_BY_MINOR[7] = {
-    {0,0}, {1,9}, {16,12}, {20,14}, {25,32}, {20,40}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
+    {0,0}, {1,9}, {16,12}, {21,13}, {25,32}, {20,39}, {0,0} // Pawn, Knight, Bishop, Rook, Queen, King
 };
 constexpr PhaseScore THREAT_BY_ROOK[7] = {
     {0,0}, {0,11}, {9,17}, {11,14}, {0,9}, {15,9}, {0,0}
 };
 constexpr PhaseScore THREAT_BY_KING = {6, 21};
 constexpr PhaseScore HANGING_PIECE_BONUS = {18, 10};
-constexpr PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {3, 0};
+constexpr PhaseScore WEAK_QUEEN_DEFENSE_BONUS = {4, 0};
 constexpr PhaseScore RESTRICTED_PIECE_BONUS = {1, 1};
-constexpr PhaseScore SAFE_PAWN_ATTACK_BONUS = {41, 24};
-constexpr PhaseScore PAWN_PUSH_THREAT_BONUS = {12, 9};
+constexpr PhaseScore SAFE_PAWN_ATTACK_BONUS = {40, 24};
+constexpr PhaseScore PAWN_PUSH_THREAT_BONUS = {13, 9};
 constexpr PhaseScore PhalanxPawnBonus[8][8] = { // [file][rank]
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 4, 7}, {14, 16}, {32, 38}, {65, 91}, { 0, 0}},
     {{ 0, 0}, { 1, 4}, { 2, 7}, { 6, 12}, {17, 20}, {35, 46}, {76, 104}, { 0, 0}},
@@ -860,16 +860,16 @@ constexpr int SHIELD_PAWN_MISSING_PENALTY = -20;
 constexpr int SHIELD_PAWN_ADVANCED_PENALTY = -12;
 constexpr int SHIELD_OPEN_FILE_PENALTY = -15;
 constexpr int SafetyKnightWeight    = 32;
-constexpr int SafetyBishopWeight    = 19;
+constexpr int SafetyBishopWeight    = 20;
 constexpr int SafetyRookWeight      = 27;
-constexpr int SafetyQueenWeight     = 23;
+constexpr int SafetyQueenWeight     = 22;
 constexpr int SafetyAttackValue     = 32;
-constexpr int SafetyWeakSquares     = 39;
-constexpr int SafetySafeQueenCheck  = 66;
-constexpr int SafetySafeRookCheck   = 61;
+constexpr int SafetyWeakSquares     = 40;
+constexpr int SafetySafeQueenCheck  = 69;
+constexpr int SafetySafeRookCheck   = 63;
 constexpr int SafetySafeBishopCheck = 50;
-constexpr int SafetySafeKnightCheck = 58;
-constexpr int SafetyAdjustment      = -63;
+constexpr int SafetySafeKnightCheck = 59;
+constexpr int SafetyAdjustment      = -65;
 
 void init_eval_masks() {
     for (int f = 0; f < 8; ++f) {
@@ -2488,3 +2488,4 @@ int main(int argc, char* argv[]) {
     uci_loop();
     return 0;
 }
+
