@@ -116,8 +116,8 @@ void init_pawn_cache() {
 }
 
 void clear_pawn_cache() {
-     if (!pawn_evaluation_cache.empty())
-        std::memset(pawn_evaluation_cache.data(), 0, pawn_evaluation_cache.size() * sizeof(PawnCacheEntry));
+    if (!pawn_evaluation_cache.empty())
+        std::fill(pawn_evaluation_cache.begin(), pawn_evaluation_cache.end(), PawnCacheEntry{});
 }
 
 // --- Zobrist Hashing ---
@@ -1467,7 +1467,7 @@ void init_tt(size_t mb_size) {
 void clear_tt() {
     g_tt_generation = 0;
     if (!transposition_table.empty())
-        std::memset(transposition_table.data(), 0, transposition_table.size() * sizeof(TTEntry));
+        std::fill(transposition_table.begin(), transposition_table.end(), TTEntry{});
 }
 
 inline void tt_new_search() { g_tt_generation++; }
@@ -2178,7 +2178,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.82\n";
+            std::cout << "id name Amira 1.82a\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;

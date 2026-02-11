@@ -1,8 +1,8 @@
-![APRECI~1](https://github.com/user-attachments/assets/1216b195-2f3a-4b05-aa7c-e27297a8d0aa)
+![Amira Chess Engine banner](https://github.com/user-attachments/assets/1216b195-2f3a-4b05-aa7c-e27297a8d0aa)
 # Amira Chess Engine
 
 **Author:** ChessTubeTree (Fauzi)
-**Version:** 1.82
+**Version:** 1.82a
 
 ## Description
 
@@ -76,11 +76,11 @@ The engine is designed to be compiled with g++ using standard C++17 or newer. No
 To compile for maximum performance:
 ```bash
 g++ -o Amira main.cpp -std=c++17 -O3 -march=native -flto
-
+```
 
 (You can use a newer C++ standard like -std=c++20 if preferred, and adjust optimization flags as desired. -O3 is highly recommended for performance.)
 
-Usage
+## Usage
 Amira is a UCI engine and requires a UCI-compatible chess GUI (Graphical User Interface) to be played, such as:
 Arena
 Cute Chess
@@ -96,13 +96,13 @@ Go to the engine management section (e.g., "Engines" -> "Manage Engines").
 Add Amira by pointing the GUI to the compiled executable file. The GUI will automatically detect it as a UCI engine.
 You can now select Amira to play against or to analyze positions. The engine supports the setoption name Hash value <MB> command to configure its transposition table size.
 
-Project Goals
+## Project Goals
 Strength: Continuously improve playing strength by implementing modern and effective chess programming techniques.
 Correctness: Always play legal moves and correctly adhere to all chess rules and the UCI protocol.
 Simplicity: Maintain a clean and understandable codebase. While historically this has meant keeping the engine in a single file, this constraint may be lifted in the future to allow for easier expansion.
 Reliability: Always return a valid move within the allocated time.
 
-Constraints
+## Constraints
 Single-File: Currently, all C++ code is in `main.cpp`. This may change in a future release to improve modularity.
 No NNUE: Does not use a Neural Network-based evaluation.
 No External Dependencies: Relies only on standard C++ libraries.
