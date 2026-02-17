@@ -2445,7 +2445,8 @@ void uci_loop() {
                     // Node-based management: scale soft limit based on move dominance
                     double best_move_fraction = (double)nodes_per_root_move[0] / std::max((uint64_t)1, nodes_searched);
                     if (elapsed_ms > soft_limit_ms * (1.8 - 1.4 * best_move_fraction))
-                        break;                }
+                        break;
+                }
                 last_iter_score = best_score_overall;
                 last_iter_best_move = uci_best_move_overall;
 
