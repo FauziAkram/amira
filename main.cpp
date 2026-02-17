@@ -1534,6 +1534,7 @@ Move killer_moves[MAX_PLY][2];
 int16_t history_score[2][2][2][64][64]; // [color][from_threat][to_threat][from][to]
 Move refutation_moves[64][64];       // For Counter-Move Heuristic
 int late_move_pruning_counts[2][MAX_PLY]; // For Late Move Pruning [improving][depth]
+uint64_t nodes_per_root_move[256];   // Tracking nodes spent on each root move
 int search_reductions[MAX_PLY][256]; // For Table-Driven LMR
 constexpr int TACTICAL_LOOKAHEAD_REDUCTION = 4;
 
@@ -1797,6 +1798,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     if (depth <= 0) return quiescence_search(pos, alpha, beta, ply);
 
+    uint64_t nodes_before = nodes_searched;
     int original_alpha = alpha;
     Move tt_move = NULL_MOVE;
     int tt_score;
@@ -1992,6 +1994,9 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
         if (stop_search_flag) return 0;
 
+        if (ply == 0)
+            nodes_per_root_move[legal_moves_played - 1] += (nodes_searched - nodes_before);
+
         if (score > best_score) {
             best_score = score;
             best_move_found = current_move;
@@ -2178,7 +2183,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.82a\n";
+            std::cout << "id name Amira 1.83\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
@@ -2306,6 +2311,7 @@ void uci_loop() {
             }
 
             reset_search_state();
+            std::memset(nodes_per_root_move, 0, sizeof(nodes_per_root_move));
             search_start_timepoint = std::chrono::steady_clock::now();
 
             long long my_time = (uci_root_pos.side_to_move == WHITE) ? wtime : btime;
@@ -2436,10 +2442,10 @@ void uci_loop() {
                         soft_limit_ms = soft_limit_ms * 3 / 2;
                         soft_limit_timepoint = search_start_timepoint + std::chrono::milliseconds(soft_limit_ms);
                     }
-                    // Confidence: if the best move is stable for a few iterations, we can consider stopping early.
-                    if (uci_best_move_overall == last_iter_best_move && elapsed_ms * 2 > soft_limit_ms)
-                         break;
-                }
+                    // Node-based management: scale soft limit based on move dominance
+                    double best_move_fraction = (double)nodes_per_root_move[0] / std::max((uint64_t)1, nodes_searched);
+                    if (elapsed_ms > soft_limit_ms * (1.8 - 1.4 * best_move_fraction))
+                        break;                }
                 last_iter_score = best_score_overall;
                 last_iter_best_move = uci_best_move_overall;
 
