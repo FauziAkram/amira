@@ -1933,7 +1933,7 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
             int see_margin = -75 * depth;
 
             // Prune the move if its SEE value is below the margin.
-            if (see(pos, current_move) < see_margin) {
+            if (current_move.score < 1000000 && see(pos, current_move) < see_margin) {
                 continue;
             }
         }
@@ -2183,7 +2183,7 @@ void uci_loop() {
         ss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Amira 1.83\n";
+            std::cout << "id name Amira 1.84\n";
             std::cout << "id author ChessTubeTree\n";
             std::cout << "option name Hash type spin default " << TT_SIZE_MB_DEFAULT << " min 0 max 16384\n";
             std::cout << "uciok\n" << std::flush;
