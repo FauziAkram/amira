@@ -1857,35 +1857,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
 
     uint64_t threats = get_all_attacked_squares(pos, 1 - pos.side_to_move);
 
-    // --- Tactical Lookahead Pruning ---
-    if (!is_pv_node && !in_check && depth >= 5 && std::abs(beta) < MATE_THRESHOLD) {
-        int raised_beta = beta + 110;
-
-        MovePicker tactical_picker(pos, ply, NULL_MOVE, NULL_MOVE, threats, true);
-        Move tactical_move;
-        while (!(tactical_move = tactical_picker.next_move()).is_null()) {
-            // Prune moves that are unlikely to raise alpha significantly. We use SEE to estimate this.
-            if (static_eval + see(pos, tactical_move) + 200 < raised_beta)
-                continue;
-
-            bool is_legal;
-            Position next_pos = make_move(pos, tactical_move, is_legal);
-            if (!is_legal) continue;
-
-            // Search with a reduced depth and the raised beta
-            int tactical_score = -search(next_pos, depth - 1 - TACTICAL_LOOKAHEAD_REDUCTION,
-                                          -raised_beta, -raised_beta + 1, ply + 1, false, true, tactical_move);
-
-            if (stop_search_flag) return 0;
-
-            if (tactical_score >= raised_beta) {
-                // The tactical lookahead was successful. We assume a cutoff.
-                store_tt(pos.zobrist_hash, depth - TACTICAL_LOOKAHEAD_REDUCTION, ply, beta, TT_LOWER, tactical_move, static_eval);
-                return beta; // Prune the node
-            }
-        }
-    }
-
     MovePicker picker(pos, ply, tt_move, prev_move, threats);
     Move current_move;
     int legal_moves_played = 0;
