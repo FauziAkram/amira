@@ -977,12 +977,14 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
 // Scales the evaluation in the endgame to account for drawish tendencies.
 // Returns a factor from 0 to 256. 256 means no change.
 int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) {
+    // Insufficient material scaling (KK, KBK, KNK, KBKB, KNKN, KBKN)
     if (pos.piece_bb[PAWN] == 0 && !pos.piece_bb[ROOK] && !pos.piece_bb[QUEEN]) {
         int white_minors = pop_count((pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & pos.color_bb[WHITE]);
         int black_minors = pop_count((pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & pos.color_bb[BLACK]);
         if (white_minors <= 1 && black_minors <= 1)
             return 0; // SCALE_FACTOR_DRAW
     }
+    // Wrong-Color Bishop + Rook Pawn Draw Detection (KBP vs K)
     int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
     int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
     int white_pawns = pop_count(pos.piece_bb[PAWN] & pos.color_bb[WHITE]);
