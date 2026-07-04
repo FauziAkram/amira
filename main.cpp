@@ -909,36 +909,6 @@ void init_eval_masks() {
     }
 }
 
-// Checks for draw by insufficient material.
-bool is_insufficient_material(const Position& pos) {
-    // If there are any pawns, rooks, or queens, it's not a draw by insufficient material.
-    if (pos.piece_bb[PAWN] != 0 || pos.piece_bb[ROOK] != 0 || pos.piece_bb[QUEEN] != 0) return false;
-
-    // Count minor pieces for both sides
-    int white_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[WHITE]);
-    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
-    int black_knights = pop_count(pos.piece_bb[KNIGHT] & pos.color_bb[BLACK]);
-    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
-    int white_minors = white_knights + white_bishops;
-    int black_minors = black_knights + black_bishops;
-
-    // Case: K vs K
-    if (white_minors == 0 && black_minors == 0) return true;
-
-    // Case: K + minor vs K
-    if ((white_minors == 1 && black_minors == 0) || (white_minors == 0 && black_minors == 1)) return true;
-
-    // Case: K + minor vs K + minor (covers K+N vs K+N, K+N vs K+B, K+B vs K+B)
-    if (white_minors == 1 && black_minors == 1) return true;
-
-    // Case: K+N+N vs K (generally treated as a draw)
-    if ((white_minors == 2 && black_minors == 0 && white_knights == 2) ||
-        (white_minors == 0 && black_minors == 2 && black_knights == 2)) return true;
-
-    // All other cases (like K+B+N vs K, K+B+B vs K) are not considered drawn by default.
-    return false;
-}
-
 // Helper function to evaluate pawn structure for one color
 void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_color,
                                        PhaseScore& pawn_score,
@@ -1007,15 +977,49 @@ void evaluate_pawn_structure_for_color(const Position& pos, Color current_eval_c
 // Scales the evaluation in the endgame to account for drawish tendencies.
 // Returns a factor from 0 to 256. 256 means no change.
 int get_endgame_material_modifier(const Position& pos, const PhaseScore& score) {
+    // Insufficient material scaling (KK, KBK, KNK, KBKB, KNKN, KBKN)
+    if (pos.piece_bb[PAWN] == 0 && !pos.piece_bb[ROOK] && !pos.piece_bb[QUEEN]) {
+        int white_minors = pop_count((pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & pos.color_bb[WHITE]);
+        int black_minors = pop_count((pos.piece_bb[KNIGHT] | pos.piece_bb[BISHOP]) & pos.color_bb[BLACK]);
+        if (white_minors <= 1 && black_minors <= 1)
+            return 0; // SCALE_FACTOR_DRAW
+    }
+    // Wrong-Color Bishop + Rook Pawn Draw Detection (KBP vs K)
+    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
+    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
+    int white_pawns = pop_count(pos.piece_bb[PAWN] & pos.color_bb[WHITE]);
+    int black_pawns = pop_count(pos.piece_bb[PAWN] & pos.color_bb[BLACK]);
+    
+    if ((white_bishops == 1 && white_pawns >= 1 && pop_count(pos.color_bb[WHITE]) == white_pawns + 2 && pop_count(pos.color_bb[BLACK]) == 1) ||
+        (black_bishops == 1 && black_pawns >= 1 && pop_count(pos.color_bb[BLACK]) == black_pawns + 2 && pop_count(pos.color_bb[WHITE]) == 1)) {
+        
+        int strong_side = (white_bishops == 1) ? WHITE : BLACK;
+        int weak_side = 1 - strong_side;
+        uint64_t strong_pawns = pos.piece_bb[PAWN] & pos.color_bb[strong_side];
+        int bishop_sq = lsb_index(pos.piece_bb[BISHOP] & pos.color_bb[strong_side]);
+        int weak_king_sq = lsb_index(pos.piece_bb[KING] & pos.color_bb[weak_side]);
+        
+        bool on_a_file = (strong_pawns & ~0x0101010101010101ULL) == 0;
+        bool on_h_file = (strong_pawns & ~0x8080808080808080ULL) == 0;
+        
+        if (on_a_file || on_h_file) {
+            int file_idx = on_a_file ? 0 : 7;
+            int queening_sq = (strong_side == WHITE) ? (56 + file_idx) : file_idx;
+            
+            if (get_bit(LIGHT_SQUARES, bishop_sq) != get_bit(LIGHT_SQUARES, queening_sq)) {
+                int k_dist = std::max(std::abs(queening_sq / 8 - weak_king_sq / 8), std::abs(queening_sq % 8 - weak_king_sq % 8));
+                if (k_dist <= 1) {
+                    return 0; // SCALE_FACTOR_DRAW
+                }
+            }
+        }
+    }
     // If there are major pieces or many minor pieces, it's not a simple endgame.
     if ((pos.piece_bb[ROOK] | pos.piece_bb[QUEEN]) != 0) {
          int white_pieces = pop_count(pos.color_bb[WHITE]);
          int black_pieces = pop_count(pos.color_bb[BLACK]);
          if (white_pieces > 3 && black_pieces > 3) return 256;
     }
-    
-    int white_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[WHITE]);
-    int black_bishops = pop_count(pos.piece_bb[BISHOP] & pos.color_bb[BLACK]);
     
     // Opposite-colored bishops endgame
     if (white_bishops == 1 && black_bishops == 1) {
@@ -1125,7 +1129,6 @@ PhaseScore evaluate_threats_for_color(const Position& pos, Color us, const uint6
 }
 
 int evaluate(Position& pos) {
-    if (is_insufficient_material(pos)) return 0; 
 
     PhaseScore final_score;
     int game_phase = 0;
@@ -1791,7 +1794,6 @@ int search(Position& pos, int depth, int alpha, int beta, int ply, bool is_pv_no
     if (ply >= MAX_PLY -1) return evaluate(pos);
     
     if (pos.halfmove_clock >= 100 && ply > 0) return 0;
-    if (ply > 0 && is_insufficient_material(pos)) return 0;
 
     bool in_check = is_square_attacked(pos, lsb_index(pos.piece_bb[KING] & pos.color_bb[pos.side_to_move]), 1 - pos.side_to_move);
     if (in_check) depth++;
